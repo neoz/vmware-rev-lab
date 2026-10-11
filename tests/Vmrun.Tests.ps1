@@ -72,6 +72,25 @@ Describe 'Invoke-Vmrun' {
         Should -Invoke Invoke-LabProcess -ModuleName LabCommon -Times 2 -Exactly
     }
 
+    It 'does not retry an ambiguous cancel of runProgramInGuest, which may already have started the program' {
+        Mock Invoke-LabProcess -ModuleName LabCommon {
+            [pscustomobject]@{ ExitCode = 255; StdOut = 'Error: The operation was canceled'; StdErr = '' }
+        }
+        { Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @('-noWait', 'x.exe') } |
+            Should -Throw -ExpectedMessage '*canceled*'
+        Should -Invoke Invoke-LabProcess -ModuleName LabCommon -Times 1 -Exactly
+    }
+
+    It 'still retries a cancel for commands that are safe to repeat' {
+        $global:VmrunCalls = 0
+        Mock Invoke-LabProcess -ModuleName LabCommon {
+            $global:VmrunCalls++
+            if ($global:VmrunCalls -lt 2) { [pscustomobject]@{ ExitCode = 255; StdOut = 'Error: The operation was canceled'; StdErr = '' } }
+            else { [pscustomobject]@{ ExitCode = 0; StdOut = 'running'; StdErr = '' } }
+        }
+        (Invoke-Vmrun -Config $cfg -Command checkToolsState).Output | Should -Be 'running'
+    }
+
     It 'gives up after RetryCount retries' {
         Mock Invoke-LabProcess -ModuleName LabCommon {
             [pscustomobject]@{ ExitCode = 255; StdOut = 'Error: The guest operations agent could not be contacted'; StdErr = '' }

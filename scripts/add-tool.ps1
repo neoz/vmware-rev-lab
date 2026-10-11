@@ -24,5 +24,6 @@ Write-LabLog $r.Output
 if ($r.ExitCode -ne 0) {
     throw "Package install failed; the guest is still on NAT. Fix it or run .\scripts\net.ps1 -Mode Analysis (without -UpdateSnapshot to discard)."
 }
+Update-LabToolsIndex -Config $config
 & (Join-Path $PSScriptRoot 'net.ps1') -Mode Analysis -UpdateSnapshot
 Write-LabLog "Installed $($Package -join ', ') and retook '$($config.SnapshotName)'"

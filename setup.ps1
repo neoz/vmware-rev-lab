@@ -46,6 +46,7 @@ function Invoke-PreflightPhase {
         $problems += 'python not found on PATH'
     }
     if ($problems) { throw "Preflight failed:`n - $($problems -join "`n - ")" }
+    Assert-LabFreshVmSlot -Config $cfg
     Write-LabLog 'Preflight OK'
 }
 
@@ -79,13 +80,8 @@ function Invoke-IsoPhase {
         $iso = (Resolve-Path $IsoPath).Path
     } else {
         $iso = Join-Path $cfg.LabDir 'iso/win10-22h2-eval-x64.iso'
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $iso) | Out-Null
-        $complete = (Test-Path $iso) -and ((Get-FileHash $iso -Algorithm SHA256).Hash -eq $cfg.IsoSha256)
-        if (-not $complete) {
-            Write-LabLog "Downloading Windows 10 evaluation ISO to $iso"
-            curl.exe -L --fail --retry 3 -C - -o $iso $cfg.IsoUrl
-            if ($LASTEXITCODE) { throw "ISO download failed (curl exit $LASTEXITCODE)" }
-        }
+        Write-LabLog "Getting Windows 10 evaluation ISO at $iso"
+        Save-LabIso -Url $cfg.IsoUrl -Path $iso -Sha256 $cfg.IsoSha256
     }
     Test-LabIsoHash -Path $iso -Expected $cfg.IsoSha256
     Save-LabLocalConfig -Root $cfg.Root -Values @{ IsoPath = $iso }
@@ -99,14 +95,7 @@ function Invoke-AnswerIsoPhase {
 
 function Invoke-CreateVmPhase {
     $cfg = $script:config
-    Assert-LabVmAbsent -Config $cfg
-    $vmDir = Split-Path -Parent $cfg.VmxPath
-    New-Item -ItemType Directory -Force -Path $vmDir | Out-Null
-    $settings = Get-LabVmxSettings -Config $cfg -WindowsIso $cfg.IsoPath -AnswerIso (Join-Path $cfg.LabDir 'answer.iso')
-    Write-LabVmx -Config $cfg -Settings $settings
-    $disk = Join-Path $vmDir $settings['sata0:0.fileName']
-    $r = Invoke-LabProcess -FilePath $cfg.VdiskManager -ArgumentList @('-c', '-s', "$($cfg.DiskGB)GB", '-a', 'lsilogic', '-t', '0', $disk) -TimeoutSec 300
-    if ($r.ExitCode -ne 0) { throw "vmware-vdiskmanager failed: $($r.StdOut) $($r.StdErr)" }
+    New-LabVm -Config $cfg -WindowsIso $cfg.IsoPath -AnswerIso (Join-Path $cfg.LabDir 'answer.iso')
     Invoke-Vmrun -Config $cfg -Command start -Arguments @('gui') | Out-Null
     Write-LabLog "VM created and started: $($cfg.VmxPath)"
 }
@@ -209,6 +198,7 @@ function Invoke-AnalysisConfigPhase {
     Wait-LabTools -Config $cfg -TimeoutSec 900
     Set-LabGuestNetwork -Config $cfg -Mode Analysis
     Assert-LabIsolation -Config $cfg
+    Update-LabToolsIndex -Config $cfg
 }
 
 function Invoke-SnapshotPhase {

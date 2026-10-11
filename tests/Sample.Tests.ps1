@@ -44,3 +44,45 @@ Describe 'Get-LabSampleEntry' {
         { Get-LabSampleEntry -ZipPath $empty } | Should -Throw -ExpectedMessage '*0 files*'
     }
 }
+
+Describe 'Get-LabSampleEntry duplicates' {
+    It 'rejects a name that appears in more than one folder of the zip' {
+        $dir = Join-Path $TestDrive 'dup'
+        New-Item -ItemType Directory -Force (Join-Path $dir 'a'), (Join-Path $dir 'b') | Out-Null
+        Set-Content (Join-Path $dir 'a/x.exe') 'x'
+        Set-Content (Join-Path $dir 'b/x.exe') 'y'
+        $zip = Join-Path $TestDrive 'dup.zip'
+        Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip
+        { Get-LabSampleEntry -ZipPath $zip -Sample 'x.exe' } | Should -Throw -ExpectedMessage "*'x.exe' appears 2 times*"
+    }
+}
+
+Describe 'Assert-LabCaseName' {
+    It 'accepts simple case names' {
+        { Assert-LabCaseName 'emotet_2026-10.v1' } | Should -Not -Throw
+    }
+
+    It 'rejects names that leave cases/' {
+        foreach ($bad in '..', '..\x', 'a/b', 'a\b', '', '.hidden') {
+            { Assert-LabCaseName $bad } | Should -Throw -ExpectedMessage '*Invalid case name*'
+        }
+    }
+}
+
+Describe 'Text fetch guards' {
+    It 'allows known text extensions only' {
+        { Assert-LabTextFetchPath 'C:\lab\out\static\capa.json' } | Should -Not -Throw
+        foreach ($bad in 'C:\lab\in\sample\x.exe', 'C:\lab\out\dump.bin', 'C:\lab\out\noext') {
+            { Assert-LabTextFetchPath $bad } | Should -Throw -ExpectedMessage '*not a text file*'
+        }
+    }
+
+    It 'rejects a fetched file that is really a PE' {
+        $pe = Join-Path $TestDrive 'fake.txt'
+        [System.IO.File]::WriteAllBytes($pe, [byte[]](0x4D, 0x5A, 0x90, 0x00))
+        { Assert-LabNotPe $pe } | Should -Throw -ExpectedMessage '*PE file*'
+        $txt = Join-Path $TestDrive 'real.txt'
+        Set-Content $txt 'hello'
+        { Assert-LabNotPe $txt } | Should -Not -Throw
+    }
+}

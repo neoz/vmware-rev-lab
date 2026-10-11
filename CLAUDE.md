@@ -7,14 +7,16 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 `scripts/`. The guest does both static and dynamic analysis.
 
 - VM: `VmxPath` in `lab.config.psd1` (default `D:\working\vmware\revlab\revlab.vmx`).
-- Snapshot: `clean` (powered on, logged in, isolated network).
+- Snapshot: `SnapshotName` in `lab.local.psd1` (`clean-<timestamp>` after the first
+  retake, `clean` before; powered on, logged in, isolated network).
 - Guest account: user `GuestUser` from `lab.config.psd1`, password
   `GuestPassword` from `lab.local.psd1`. Read them from those files when a
   `vmware-mcp` tool needs `user` / `password`. Never print the password in
   replies, notes or commits.
 - Guest layout: `C:\lab\in` (samples), `C:\lab\out` (monitor output),
   `C:\lab\tmp` (script runs), `C:\lab\tools.json` (absolute paths of every
-  analysis tool below; read it instead of guessing paths).
+  analysis tool below; read it instead of guessing paths), `C:\lab\tools-index.txt`
+  (every executable under `C:\Tools`, including tools added later).
 - The guest carries a lean, CLI-first FLARE-VM set (`templates/flare-config.xml`)
   because Claude drives it; there are no GUI analysis tools.
 - Case layout on the host: `cases/<case>/sample.zip` (password `infected`),
@@ -30,6 +32,10 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 | Run a CLI tool in the guest | `vmrun_run` or `vmrun_script`, writing output under `C:\lab\out\static\` |
 | Bring a guest file to the host | `pwsh -File scripts/fetch.ps1 -Case <c> -GuestPath <p> [-Text]` |
 | Look at the screen | `vmrun_screenshot` |
+
+`fetch.ps1 -Text` only takes text extensions (`.txt .log .json .csv .tsv .xml
+.md .yar .yara .c .cs .py .js .ini`) and deletes anything with an MZ header;
+everything else is fetched zipped. Case names are letters, digits, `.`, `_`, `-`.
 
 `vmrun_run` splits `args` on whitespace and loses quotes. For arguments with
 spaces or quotes, write a `.ps1` (or use `vmrun_script`) instead.

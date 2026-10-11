@@ -24,6 +24,7 @@ Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name "detonate-$Case" | Out-Null
 
+Assert-LabCaseName $Case
 $caseDir = Join-Path $config.Root "cases/$Case"
 $zip = Join-Path $caseDir 'sample.zip'
 if (-not (Test-Path $zip)) { throw "Missing $zip (zip the sample with password 'infected')" }

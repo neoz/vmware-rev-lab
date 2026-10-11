@@ -15,11 +15,14 @@ Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name "fetch-$Case" | Out-Null
 
+Assert-LabCaseName $Case
 $dest = Join-Path $config.Root "cases/$Case/fetched"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $leaf = Split-Path -Leaf $GuestPath
 if ($Text) {
+    Assert-LabTextFetchPath $GuestPath
     Copy-LabFromGuest -Config $config -GuestPath $GuestPath -HostPath (Join-Path $dest $leaf)
+    Assert-LabNotPe (Join-Path $dest $leaf)
     Write-LabLog "Fetched $GuestPath -> $(Join-Path $dest $leaf)"
 } else {
     $guestZip = "C:\lab\tmp\fetch-$([guid]::NewGuid().ToString('N').Substring(0, 8)).zip"

@@ -1,6 +1,12 @@
 # Analysis: static IP on the isolated segment. Setup: DHCP for NAT.
 param([string]$Mode, [string]$Ip, [string]$Prefix, [string]$Gateway)
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell turns stderr of a redirected native command into an error under 'Stop'; judge by exit code.
+function Invoke-Native([string]$File, [string[]]$Arguments) {
+    $ErrorActionPreference = 'Continue'
+    $output = & $File @Arguments 2>&1 | Out-String
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
 
 $nic = $null
 foreach ($i in 1..30) {
@@ -27,7 +33,8 @@ if ($Mode -eq 'Analysis') {
     Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false
     Set-NetIPInterface -InterfaceIndex $index -Dhcp Enabled
     Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses
-    ipconfig /renew | Out-Null
+    $r = Invoke-Native 'ipconfig.exe' @('/renew')
+    if ($r.ExitCode -ne 0) { throw "ipconfig /renew failed (exit $($r.ExitCode)):`n$($r.Output)" }
 } else {
     throw "Unknown mode '$Mode'"
 }

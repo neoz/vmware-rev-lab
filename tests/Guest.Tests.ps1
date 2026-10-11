@@ -26,19 +26,32 @@ Describe 'Snapshots' {
         Get-LabSnapshots -Config $cfg | Should -Be @('base', 'clean')
     }
 
-    It 'deletes an existing snapshot before taking it again' {
+    It 'takes the new snapshot before deleting the old one and records its name' {
+        $global:SnapOps = [System.Collections.Generic.List[string]]::new()
+        $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean'; Root = $TestDrive }
+        Mock Save-LabLocalConfig -ModuleName LabCommon {}
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = "Total snapshots: 1`nclean"; GuestExitCode = 0 } }
-        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -in 'deleteSnapshot', 'snapshot' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
-        Update-LabSnapshot -Config $cfg
-        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'deleteSnapshot' -and $Arguments[0] -eq 'clean' }
-        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'snapshot' -and $Arguments[0] -eq 'clean' }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -in 'deleteSnapshot', 'snapshot' } {
+            $global:SnapOps.Add("$Command $($Arguments[0])")
+            [pscustomobject]@{ Output = ''; GuestExitCode = 0 }
+        }
+        Update-LabSnapshot -Config $c
+        $global:SnapOps.Count | Should -Be 2
+        $global:SnapOps[0] | Should -Match '^snapshot clean-\d{14}$'
+        $global:SnapOps[1] | Should -Be 'deleteSnapshot clean'
+        $c.SnapshotName | Should -Match '^clean-\d{14}$'
+        Should -Invoke Save-LabLocalConfig -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Values.SnapshotName -eq $c.SnapshotName }
     }
 
-    It 'does not delete when the snapshot is absent' {
-        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = 'Total snapshots: 0'; GuestExitCode = 0 } }
-        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -in 'deleteSnapshot', 'snapshot' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
-        Update-LabSnapshot -Config $cfg
+    It 'keeps the old snapshot when taking the new one fails' {
+        $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean-20260101000000'; Root = $TestDrive }
+        Mock Save-LabLocalConfig -ModuleName LabCommon {}
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = "Total snapshots: 1`nclean-20260101000000"; GuestExitCode = 0 } }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'snapshot' } { throw 'disk full' }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'deleteSnapshot' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
+        { Update-LabSnapshot -Config $c } | Should -Throw -ExpectedMessage '*disk full*'
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'deleteSnapshot' }
+        $c.SnapshotName | Should -Be 'clean-20260101000000'
     }
 }
 
@@ -137,5 +150,16 @@ Describe 'Invoke-LabGuestScript' {
             $Arguments[1] -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -and
             $Arguments[-1] -like 'C:\lab\tmp\wrap-*.ps1'
         }
+    }
+}
+
+Describe 'Assert-LabIsolation' {
+    It 'fails without running the guest check when the VMX is on NAT' {
+        $vmx = Join-Path $TestDrive 'nat.vmx'
+        Set-Content $vmx 'ethernet0.connectionType = "nat"'
+        $c = @{ VmxPath = $vmx; AnalysisPvnId = '52 01'; Root = $TestDrive }
+        Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 0; Output = 'Isolation OK' } }
+        { Assert-LabIsolation -Config $c } | Should -Throw -ExpectedMessage '*not on the analysis LAN segment*'
+        Should -Invoke Invoke-LabGuestScript -ModuleName LabCommon -Times 0 -Exactly
     }
 }

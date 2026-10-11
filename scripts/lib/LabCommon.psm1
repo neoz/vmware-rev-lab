@@ -145,6 +145,8 @@ function Invoke-Vmrun {
             return [pscustomobject]@{ Output = $result.StdOut; GuestExitCode = [int]$Matches[1] }
         }
         $transient = $script:TransientVmrunErrors | Where-Object { $text -like "*$_*" }
+        # A cancelled runProgramInGuest may already have started the program; retrying would start it twice.
+        if ($Command -eq 'runProgramInGuest' -and $text -like '*The operation was canceled*') { $transient = $null }
         if (-not $transient -or $attempt -gt $RetryCount) {
             throw "vmrun $Command failed (exit $($result.ExitCode)): $text"
         }
@@ -566,12 +568,18 @@ function Get-LabSnapshots {
 }
 
 function Update-LabSnapshot {
+    # vmrun cannot rename snapshots, so take a new timestamped one first and delete the old one only after
+    # that succeeded; a failure never leaves the lab without a clean snapshot.
     param([Parameter(Mandatory)][hashtable]$Config)
-    if ($Config.SnapshotName -in (Get-LabSnapshots -Config $Config)) {
-        Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 1800 | Out-Null
+    $old = $Config.SnapshotName
+    $new = '{0}-{1:yyyyMMddHHmmss}' -f ($old -replace '-\d{14}$', ''), (Get-Date)
+    Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($new) -TimeoutSec 1800 | Out-Null
+    Save-LabLocalConfig -Root $Config.Root -Values @{ SnapshotName = $new }
+    $Config.SnapshotName = $new
+    if ($old -in (Get-LabSnapshots -Config $Config)) {
+        Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($old) -TimeoutSec 1800 | Out-Null
     }
-    Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($Config.SnapshotName) -TimeoutSec 1800 | Out-Null
-    Write-LabLog "Snapshot '$($Config.SnapshotName)' taken"
+    Write-LabLog "Snapshot '$new' taken (replaces '$old')"
 }
 
 function Restore-LabClean {
@@ -637,6 +645,9 @@ function Set-LabGuestNetwork {
 
 function Assert-LabIsolation {
     param([Parameter(Mandatory)][hashtable]$Config)
+    # The guest-side test also passes on NAT once the static IP is set, so check the VM's NIC first.
+    $mode = Get-LabVmxNetworkMode -Config $Config
+    if ($mode -ne 'Analysis') { throw "VM network is '$mode', not on the analysis LAN segment." }
     $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/test-isolation.ps1') -Arguments @{
         HostIps = (Get-LabHostIPv4) -join ','
     } -TimeoutSec 300
@@ -662,6 +673,8 @@ function Get-LabSampleEntry {
     }
     if ($Sample) {
         if ($Sample -notin $names) { throw "'$Sample' is not in $ZipPath. Files: $($names -join ', ')" }
+        $count = @($names | Where-Object { $_ -eq $Sample }).Count
+        if ($count -gt 1) { throw "'$Sample' appears $count times in $ZipPath (different folders); repack it with a unique name." }
         $entry = $Sample
     } elseif ($names.Count -eq 1) {
         $entry = $names[0]
@@ -674,4 +687,100 @@ function Get-LabSampleEntry {
     }
     if ($extension -eq '.dll' -and -not $Export) { throw "'$entry' is a DLL; pass -Export <function> to run it with rundll32" }
     $entry
+}
+
+function Assert-LabCaseName {
+    # Case names become folders under cases/; refuse anything that could leave it.
+    param([string]$Case)
+    if ($Case -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or $Case -match '\.\.') {
+        throw "Invalid case name '$Case': use letters, digits, '.', '_' or '-', starting with a letter or digit."
+    }
+}
+
+$script:TextFetchExtensions = @('.txt', '.log', '.json', '.csv', '.tsv', '.xml', '.md', '.yar', '.yara', '.c', '.cs', '.py', '.js', '.ini')
+
+function Assert-LabTextFetchPath {
+    param([Parameter(Mandatory)][string]$GuestPath)
+    $extension = [System.IO.Path]::GetExtension($GuestPath).ToLowerInvariant()
+    if ($extension -notin $script:TextFetchExtensions) {
+        throw "'$GuestPath' is not a text file ($($script:TextFetchExtensions -join ' ')); fetch it without -Text so it is zipped."
+    }
+}
+
+function Assert-LabNotPe {
+    # A sample can write an executable under a text name; never leave one unzipped on the host.
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $head = [byte[]]::new(2)
+        $read = $stream.Read($head, 0, 2)
+    } finally {
+        $stream.Dispose()
+    }
+    if ($read -eq 2 -and $head[0] -eq 0x4D -and $head[1] -eq 0x5A) {
+        Remove-Item -Path $Path -Force
+        throw "'$Path' is a PE file (MZ header); deleted. Fetch it without -Text."
+    }
+}
+
+function Assert-LabFreshVmSlot {
+    # Run from Preflight so an existing VM stops setup before any download; a VM this setup created is fine.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if ('CreateVm' -notin @(Get-LabState -Path $Config.StatePath)) { Assert-LabVmAbsent -Config $Config }
+}
+
+function New-LabVm {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$WindowsIso,
+        [Parameter(Mandatory)][string]$AnswerIso
+    )
+    Assert-LabVmAbsent -Config $Config
+    $vmDir = Split-Path -Parent $Config.VmxPath
+    $createdDir = -not (Test-Path $vmDir)
+    New-Item -ItemType Directory -Force -Path $vmDir | Out-Null
+    $settings = Get-LabVmxSettings -Config $Config -WindowsIso $WindowsIso -AnswerIso $AnswerIso
+    $disk = Join-Path $vmDir $settings['sata0:0.fileName']
+    try {
+        Write-LabVmx -Config $Config -Settings $settings
+        $r = Invoke-LabProcess -FilePath $Config.VdiskManager -ArgumentList @('-c', '-s', "$($Config.DiskGB)GB", '-a', 'lsilogic', '-t', '0', $disk) -TimeoutSec 300
+        if ($r.ExitCode -ne 0) { throw "vmware-vdiskmanager failed: $($r.StdOut) $($r.StdErr)" }
+    } catch {
+        # Leave nothing behind, so '-From CreateVm' can simply run again.
+        if ($createdDir) { Remove-Item -Path $vmDir -Recurse -Force -ErrorAction SilentlyContinue }
+        else { Remove-Item -Path $Config.VmxPath, $disk -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+}
+
+function Save-LabIso {
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Sha256
+    )
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    if ((Test-Path $Path) -and (Get-FileHash -Path $Path -Algorithm SHA256).Hash -eq $Sha256.ToUpperInvariant()) { return }
+    $curlArgs = { @('-L', '--fail', '--retry', '3', '--no-progress-meter', '-C', '-', '-o', $Path, $Url) }
+    $r = Invoke-LabProcess -FilePath 'curl.exe' -ArgumentList (& $curlArgs) -TimeoutSec 10800
+    if ($r.ExitCode -ne 0 -and (Test-Path $Path)) {
+        # Resuming a corrupt full-size file fails (HTTP 416); start over once.
+        Write-LabLog "Resume failed (curl exit $($r.ExitCode)); downloading from scratch"
+        Remove-Item -Path $Path -Force
+        $r = Invoke-LabProcess -FilePath 'curl.exe' -ArgumentList (& $curlArgs) -TimeoutSec 10800
+    }
+    if ($r.ExitCode -ne 0) { throw "ISO download failed (curl exit $($r.ExitCode)): $($r.StdErr)" }
+    try {
+        Test-LabIsoHash -Path $Path -Expected $Sha256
+    } catch {
+        Remove-Item -Path $Path -Force
+        throw
+    }
+}
+
+function Update-LabToolsIndex {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/index-tools.ps1')
+    Write-LabLog $r.Output
+    if ($r.ExitCode -ne 0) { throw "index-tools.ps1 failed: $($r.Output)" }
 }
