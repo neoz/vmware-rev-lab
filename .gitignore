@@ -1,0 +1,17 @@
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Specs, plans, working notes
+docs/superpowers/
+
+# Generated at setup: guest password, downloaded ISO path
+lab.local.psd1
+
+# Setup state, logs, downloaded and generated ISOs
+.lab/
+
+# vmware-mcp clone and its venv
+tools/vmware-mcp/
+
+# Analysis targets and artefacts
+cases/
