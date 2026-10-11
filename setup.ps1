@@ -144,6 +144,35 @@ turn off Tamper Protection, then run: .\setup.ps1 -From GuestPrep
     if ($r.ExitCode -ne 0) { throw "guest-prep.ps1 failed (exit $($r.ExitCode)): $($r.Output)" }
 }
 
+function Invoke-FlareVmPhase {
+    $cfg = $script:config
+    $check = Join-Path $cfg.Root 'templates/guest/test-flare.ps1'
+    $state = Invoke-LabGuestScript -Config $cfg -Path $check
+    if ($state.ExitCode -eq 2) {
+        $installer = Join-Path $cfg.LabDir 'flare-install.ps1'
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mandiant/flare-vm/$($cfg.FlareVmCommit)/install.ps1" -OutFile $installer
+        New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
+        Copy-LabToGuest -Config $cfg -HostPath $installer -GuestPath 'C:\lab\setup\install.ps1'
+        Write-LabLog 'Starting FLARE-VM install (reboots several times; 1.5 to 2 h)'
+        Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @(
+            '-noWait', '-interactive', 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+            '-NoProfile', '-ExecutionPolicy', 'Unrestricted', '-File', 'C:\lab\setup\install.ps1',
+            '-password', $cfg.GuestPassword, '-noWait', '-noGui', '-noChecks'
+        ) | Out-Null
+    } else {
+        Write-LabLog "FLARE-VM already started: $($state.Output)"
+    }
+    Wait-LabCondition -Description 'FLARE-VM install' -TimeoutSec (4 * 3600) -PollSec 120 -Condition {
+        try {
+            $r = Invoke-LabGuestScript -Config $cfg -Path $check
+            Write-LabLog "  $(($r.Output -split "`r?`n")[0])" -Quiet
+            $r.ExitCode -eq 0
+        } catch { $false }
+    }
+    $final = Invoke-LabGuestScript -Config $cfg -Path $check
+    Write-LabLog "FLARE-VM finished: $($final.Output)"
+}
+
 $phases = [ordered]@{
     Preflight      = { Invoke-PreflightPhase }
     Mcp            = { Invoke-McpPhase }
@@ -152,6 +181,7 @@ $phases = [ordered]@{
     CreateVm       = { Invoke-CreateVmPhase }
     WindowsInstall = { Invoke-WindowsInstallPhase }
     GuestPrep      = { Invoke-GuestPrepPhase }
+    FlareVm        = { Invoke-FlareVmPhase }
 }
 
 Invoke-LabPhases -Phases $phases -StatePath $script:config.StatePath -From $From
