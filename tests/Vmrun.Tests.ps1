@@ -57,6 +57,20 @@ Describe 'Invoke-Vmrun' {
         Should -Invoke Invoke-LabProcess -ModuleName LabCommon -Times 3 -Exactly
     }
 
+    It 'retries while autologon has not reached the desktop yet' {
+        $global:VmrunCalls = 0
+        Mock Invoke-LabProcess -ModuleName LabCommon {
+            $global:VmrunCalls++
+            if ($global:VmrunCalls -lt 2) {
+                [pscustomobject]@{ ExitCode = 255; StdOut = 'Error: The specified guest user must be logged in interactively to perform this operation'; StdErr = '' }
+            } else {
+                [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' }
+            }
+        }
+        Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @('-interactive', 'x.exe') | Out-Null
+        Should -Invoke Invoke-LabProcess -ModuleName LabCommon -Times 2 -Exactly
+    }
+
     It 'gives up after RetryCount retries' {
         Mock Invoke-LabProcess -ModuleName LabCommon {
             [pscustomobject]@{ ExitCode = 255; StdOut = 'Error: The guest operations agent could not be contacted'; StdErr = '' }

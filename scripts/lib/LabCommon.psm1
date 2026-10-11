@@ -104,6 +104,7 @@ $script:TransientVmrunErrors = @(
     'VMware Tools are not running'
     'The guest operations agent'
     'The operation was canceled'
+    'must be logged in interactively'
 )
 
 function Invoke-Vmrun {
