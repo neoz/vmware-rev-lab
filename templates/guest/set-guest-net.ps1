@@ -17,7 +17,13 @@ if ($Mode -eq 'Analysis') {
     Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false
     New-NetIPAddress -InterfaceIndex $index -IPAddress $Ip -PrefixLength ([int]$Prefix) -DefaultGateway $Gateway | Out-Null
     Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $Gateway
+    # Nobody owns the gateway address, so without an ARP entry Windows drops off-subnet traffic
+    # (ICMP host unreachable) before FakeNet-NG can divert it. A static entry lets packets leave.
+    Get-NetNeighbor -InterfaceIndex $index -IPAddress $Gateway -ErrorAction SilentlyContinue | Remove-NetNeighbor -Confirm:$false
+    New-NetNeighbor -InterfaceIndex $index -IPAddress $Gateway -LinkLayerAddress '02-00-00-66-06-01' -State Permanent | Out-Null
 } elseif ($Mode -eq 'Setup') {
+    Get-NetNeighbor -InterfaceIndex $index -State Permanent -ErrorAction SilentlyContinue |
+        Where-Object LinkLayerAddress -eq '02-00-00-66-06-01' | Remove-NetNeighbor -Confirm:$false
     Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false
     Set-NetIPInterface -InterfaceIndex $index -Dhcp Enabled
     Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses
