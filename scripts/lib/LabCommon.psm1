@@ -195,3 +195,101 @@ function Invoke-LabPhases {
         Set-LabState -Path $StatePath -Completed $completed
     }
 }
+
+function Get-LabVmxSettings {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$WindowsIso,
+        [Parameter(Mandatory)][string]$AnswerIso
+    )
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Config.VmxPath)
+    $settings = [ordered]@{
+        '.encoding'                     = 'UTF-8'
+        'config.version'                = '8'
+        'virtualHW.version'             = '20'
+        'displayName'                   = $name
+        'guestOS'                       = 'windows9-64'
+        'firmware'                      = 'bios'
+        'numvcpus'                      = "$($Config.Cpu)"
+        'cpuid.coresPerSocket'          = "$($Config.Cpu)"
+        'memsize'                       = "$($Config.MemoryMB)"
+        'sata0.present'                 = 'TRUE'
+        'sata0:0.present'               = 'TRUE'
+        'sata0:0.fileName'              = "$name.vmdk"
+        'ethernet0.present'             = 'TRUE'
+        'ethernet0.virtualDev'          = 'e1000e'
+        'ethernet0.connectionType'      = 'nat'
+        'ethernet0.addressType'         = 'generated'
+        'ethernet0.startConnected'      = 'TRUE'
+        'usb.present'                   = 'TRUE'
+        'sound.present'                 = 'FALSE'
+        'floppy0.present'               = 'FALSE'
+        'isolation.tools.hgfs.disable'  = 'TRUE'
+        'isolation.tools.dnd.disable'   = 'TRUE'
+        'isolation.tools.copy.disable'  = 'TRUE'
+        'isolation.tools.paste.disable' = 'TRUE'
+        'sharedFolder.maxNum'           = '0'
+        'tools.syncTime'                = 'FALSE'
+    }
+    $media = @($WindowsIso, $AnswerIso, $Config.ToolsIso)
+    for ($i = 1; $i -le 3; $i++) {
+        $settings["sata0:$i.present"] = 'TRUE'
+        $settings["sata0:$i.deviceType"] = 'cdrom-image'
+        $settings["sata0:$i.fileName"] = $media[$i - 1]
+        $settings["sata0:$i.startConnected"] = 'TRUE'
+    }
+    $settings
+}
+
+function ConvertTo-VmxText {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Settings)
+    ($Settings.Keys | ForEach-Object { '{0} = "{1}"' -f $_, $Settings[$_] }) -join "`r`n"
+}
+
+function ConvertFrom-VmxText {
+    param([Parameter(Mandatory)][string]$Text)
+    $settings = [ordered]@{}
+    foreach ($line in $Text -split "`r?`n") {
+        if ($line -match '^\s*([^=#\s][^=]*?)\s*=\s*"(.*)"\s*$') { $settings[$Matches[1]] = $Matches[2] }
+    }
+    $settings
+}
+
+function Read-LabVmx { param([hashtable]$Config) ConvertFrom-VmxText (Get-Content -Path $Config.VmxPath -Raw) }
+
+function Write-LabVmx {
+    param([hashtable]$Config, [System.Collections.IDictionary]$Settings)
+    Set-Content -Path $Config.VmxPath -Value (ConvertTo-VmxText $Settings) -Encoding utf8
+}
+
+function Set-LabVmxNetwork {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][ValidateSet('Setup', 'Analysis')][string]$Mode
+    )
+    $settings = Read-LabVmx $Config
+    if ($Mode -eq 'Setup') {
+        $settings['ethernet0.connectionType'] = 'nat'
+        $settings.Remove('ethernet0.pvnID')
+    } else {
+        $settings['ethernet0.connectionType'] = 'pvn'
+        $settings['ethernet0.pvnID'] = $Config.AnalysisPvnId
+    }
+    Write-LabVmx $Config $settings
+}
+
+function Get-LabVmxNetworkMode {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $settings = Read-LabVmx $Config
+    $type = $settings['ethernet0.connectionType']
+    if ($type -eq 'nat') { return 'Setup' }
+    if ($type -eq 'pvn' -and $settings['ethernet0.pvnID'] -eq $Config.AnalysisPvnId) { return 'Analysis' }
+    'Unknown'
+}
+
+function Remove-LabVmxInstallMedia {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $settings = Read-LabVmx $Config
+    foreach ($key in @($settings.Keys | Where-Object { $_ -match '^sata0:[123]\.' })) { $settings.Remove($key) }
+    Write-LabVmx $Config $settings
+}
