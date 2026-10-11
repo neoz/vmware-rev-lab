@@ -145,3 +145,53 @@ function Invoke-Vmrun {
         Start-Sleep -Seconds $RetryDelaySec
     }
 }
+
+function Get-LabState {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    @((Get-Content $Path -Raw | ConvertFrom-Json).Completed)
+}
+
+function Set-LabState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Completed = @()
+    )
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    @{ Completed = @($Completed) } | ConvertTo-Json | Set-Content -Path $Path -Encoding utf8
+}
+
+function Invoke-LabPhases {
+    param(
+        [Parameter(Mandatory)][System.Collections.Specialized.OrderedDictionary]$Phases,
+        [Parameter(Mandatory)][string]$StatePath,
+        [string]$From
+    )
+    $names = @($Phases.Keys)
+    if ($From -and $From -notin $names) {
+        throw "Unknown phase '$From'. Phases: $($names -join ', ')"
+    }
+    $completed = [System.Collections.Generic.List[string]]::new([string[]]@(Get-LabState -Path $StatePath))
+    if ($From) {
+        $rerun = $names[[array]::IndexOf($names, $From)..($names.Count - 1)]
+        $completed.RemoveAll([Predicate[string]] { param($n) $n -in $rerun }) | Out-Null
+        Set-LabState -Path $StatePath -Completed $completed
+    }
+    foreach ($name in $names) {
+        if ($name -in $completed) {
+            Write-LabLog "== $name (already done, skipping)"
+            continue
+        }
+        Write-LabLog "== $name"
+        try {
+            & $Phases[$name]
+        } catch {
+            Write-LabLog "!! Phase $name failed: $($_.Exception.Message)"
+            Write-LabLog "   Log: $(Get-LabLogPath)"
+            Write-LabLog "   Resume with: .\setup.ps1 -From $name"
+            throw
+        }
+        $completed.Add($name)
+        Set-LabState -Path $StatePath -Completed $completed
+    }
+}
