@@ -611,3 +611,28 @@ function New-LabMcpJson {
         }
     } | ConvertTo-Json -Depth 5
 }
+
+function Get-LabHostIPv4 {
+    @(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | ForEach-Object IPAddress)
+}
+
+function Set-LabGuestNetwork {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][ValidateSet('Setup', 'Analysis')][string]$Mode
+    )
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/set-guest-net.ps1') -Arguments @{
+        Mode = $Mode; Ip = $Config.GuestIp; Prefix = $Config.GuestPrefix; Gateway = $Config.GuestGateway
+    }
+    Write-LabLog $r.Output -Quiet
+    if ($r.ExitCode -ne 0) { throw "set-guest-net.ps1 -Mode $Mode failed: $($r.Output)" }
+}
+
+function Assert-LabIsolation {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/test-isolation.ps1') -Arguments @{
+        HostIps = (Get-LabHostIPv4) -join ','
+    } -TimeoutSec 300
+    Write-LabLog $r.Output
+    if ($r.ExitCode -ne 0) { throw "Isolation check failed: $($r.Output)" }
+}

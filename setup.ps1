@@ -173,6 +173,34 @@ function Invoke-FlareVmPhase {
     Write-LabLog "FLARE-VM finished: $($final.Output)"
 }
 
+function Invoke-AnalysisConfigPhase {
+    $cfg = $script:config
+    $sysmonConfig = Join-Path $cfg.LabDir 'sysmonconfig.xml'
+    Invoke-WebRequest -Uri $cfg.SysmonConfigUrl -OutFile $sysmonConfig
+    New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
+    Copy-LabToGuest -Config $cfg -HostPath $sysmonConfig -GuestPath 'C:\lab\setup\sysmonconfig.xml'
+    $r = Invoke-LabGuestScript -Config $cfg -Path (Join-Path $cfg.Root 'templates/guest/analysis-config.ps1') -Arguments @{
+        SysmonConfig = 'C:\lab\setup\sysmonconfig.xml'
+    } -TimeoutSec 1800
+    Write-LabLog $r.Output
+    if ($r.ExitCode -ne 0) { throw 'analysis-config.ps1 failed' }
+
+    Stop-LabVm -Config $cfg
+    Set-LabVmxNetwork -Config $cfg -Mode Analysis
+    Remove-LabVmxInstallMedia -Config $cfg
+    Start-LabVm -Config $cfg
+    Wait-LabTools -Config $cfg -TimeoutSec 900
+    Set-LabGuestNetwork -Config $cfg -Mode Analysis
+    Assert-LabIsolation -Config $cfg
+}
+
+function Invoke-SnapshotPhase {
+    $cfg = $script:config
+    Restart-LabGuest -Config $cfg
+    Wait-LabDesktop -Config $cfg
+    Update-LabSnapshot -Config $cfg
+}
+
 $phases = [ordered]@{
     Preflight      = { Invoke-PreflightPhase }
     Mcp            = { Invoke-McpPhase }
@@ -182,6 +210,8 @@ $phases = [ordered]@{
     WindowsInstall = { Invoke-WindowsInstallPhase }
     GuestPrep      = { Invoke-GuestPrepPhase }
     FlareVm        = { Invoke-FlareVmPhase }
+    AnalysisConfig = { Invoke-AnalysisConfigPhase }
+    Snapshot       = { Invoke-SnapshotPhase }
 }
 
 Invoke-LabPhases -Phases $phases -StatePath $script:config.StatePath -From $From
