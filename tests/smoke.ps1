@@ -68,6 +68,30 @@ Test-Step '5. vmware-mcp answers over MCP' {
     }
 }
 
+$python = Join-Path $config.Root 'tools/vmware-mcp/.venv/Scripts/python.exe'
+$client = Join-Path $root 'tests/mcp_client.py'
+$mcpJson = Join-Path $config.Root '.mcp.json'
+$notepadCase = 'smoke-notepad'
+$notepadDir = Join-Path $config.Root "cases/$notepadCase"
+
+Test-Step '6. revlab-ghidra lists notepad functions' {
+    if (Test-Path $notepadDir) { Remove-Item $notepadDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $notepadDir | Out-Null
+    Compress-Archive -Path "$env:windir\System32\notepad.exe" -DestinationPath (Join-Path $notepadDir 'sample.zip')
+    Restore-LabClean -Config $config
+    $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+    $out = & $python -I $client $mcpJson revlab-ghidra ghidra-functions $path 'WinMain|wWinMain' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $out -notmatch 'WinMain') { throw "no WinMain in: $out" }
+}
+
+Test-Step '7. revlab-windbg attaches to a debug launch and runs lm' {
+    & (Join-Path $root 'scripts/debug.ps1') -Case $notepadCase
+    $out = & $python -I $client $mcpJson revlab-windbg windbg-lm 'npipe:server=.,pipe=revlab-dbg' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $out -notmatch 'ntdll') { throw "lm without ntdll: $out" }
+    & (Join-Path $root 'scripts/reset.ps1')
+    Remove-Item $notepadDir -Recurse -Force
+}
+
 if ($failures.Count) {
     Write-LabLog "Smoke test FAILED: $($failures -join '; ')"
     exit 1

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 
 from mcp import ClientSession, StdioServerParameters
@@ -30,7 +31,8 @@ async def run(mcp_json, name, check, args):
                 print(text(await s.call_tool("list_functions", {"database": db, "filter_pattern": args[1], "limit": 20})))
             elif check == "windbg-lm":
                 opened = text(await s.call_tool("open_cdb_remote", {"connection_string": args[0]}))
-                session = json.loads(opened)["session_id"] if opened.strip().startswith("{") else opened.split("session_id")[-1].split()[0].strip(":=\"' ,")
+                # mcp-windbg answers in text: first line "session_id: cdb-xxxxxxxx".
+                session = re.search(r"session_id:\s*(\S+)", opened).group(1)
                 print(text(await s.call_tool("run_cdb_command", {"session_id": session, "command": "lm"})))
                 await s.call_tool("close_cdb_session", {"session_id": session})
             else:

@@ -17,7 +17,10 @@
       "mcp__vmware-mcp__mks_screenshot",
       "mcp__vmware-mcp__config_query",
       "mcp__vmware-mcp__ethernet_query",
-      "mcp__vmware-mcp__hgfs_query"
+      "mcp__vmware-mcp__hgfs_query",
+      "mcp__revlab-ghidra__wait_for_analysis",
+      "mcp__revlab-ghidra__list_functions",
+      "mcp__revlab-ghidra__decompile_function"
     ],
     "deny": [
       "mcp__vmware-mcp__vm_delete",

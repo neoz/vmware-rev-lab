@@ -12,6 +12,14 @@ function Assert-Native($r, [string]$What) { if ($r.ExitCode -ne 0) { throw "$Wha
 $mcp = 'C:\lab\mcp'
 $toolsPath = 'C:\lab\tools.json'
 $tools = Get-Content $toolsPath -Raw | ConvertFrom-Json
+# Executables inside the WinDbg MSIX package cannot be started directly (Access is denied); run a copy.
+$cdbDir = 'C:\Tools\cdb'
+if (-not (Test-Path "$cdbDir\cdb.exe")) {
+    New-Item -ItemType Directory -Force -Path $cdbDir | Out-Null
+    Copy-Item -Path (Join-Path (Split-Path $tools.Cdb) '*') -Destination $cdbDir -Recurse -Force
+}
+$tools.Cdb = "$cdbDir\cdb.exe"
+
 $base = (& py -3.13 -c "import sys; print(sys.executable)").Trim()
 $pythonw = Join-Path (Split-Path $base) 'pythonw.exe'
 
