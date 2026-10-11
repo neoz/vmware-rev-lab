@@ -75,8 +75,8 @@ $tools = [ordered]@{
     Floss           = Find-Tool 'floss.exe'
     Diec            = Find-Tool 'diec.exe'
     Tshark          = Find-Tool 'tshark.exe'
-    PeSieve         = Find-Tool 'pe-sieve64.exe'
-    HollowsHunter   = Find-Tool 'hollows_hunter64.exe'
+    PeSieve         = Find-Tool 'pe-sieve.exe'
+    HollowsHunter   = Find-Tool 'hollows_hunter.exe'
     De4dot          = Find-Tool 'de4dot.exe'
 }
 $missing = @($tools.Keys | Where-Object { -not $tools[$_] -or -not (Test-Path $tools[$_]) })
