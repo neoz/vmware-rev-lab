@@ -18,5 +18,8 @@
     VmwareMcpCommit = '5b4f4c2119445f05ae28d34075424d32c56cc66c'
     McpVersion      = '1.30.0'
     FlareVmCommit   = '5dc321d336f2d1b0c77343bdfd8cd3ac01ba1b37'
+    FridaToolsVersion = '14.11.0'
+    DotnetSdkVersion  = '10.0.401'
+    IlspyCmdVersion   = '11.1.0.9782'
     SysmonConfigUrl = 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/1836897f12fbd6a0a473665ef6abc34a6b497e31/sysmonconfig-export.xml'
 }

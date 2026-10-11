@@ -13,8 +13,10 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
   `vmware-mcp` tool needs `user` / `password`. Never print the password in
   replies, notes or commits.
 - Guest layout: `C:\lab\in` (samples), `C:\lab\out` (monitor output),
-  `C:\lab\tmp` (script runs), `C:\lab\tools.json` (paths of Procmon, FakeNet,
-  Sysmon, 7-Zip).
+  `C:\lab\tmp` (script runs), `C:\lab\tools.json` (absolute paths of every
+  analysis tool below; read it instead of guessing paths).
+- The guest carries a lean, CLI-first FLARE-VM set (`templates/flare-config.xml`)
+  because Claude drives it; there are no GUI analysis tools.
 - Case layout on the host: `cases/<case>/sample.zip` (password `infected`),
   `notes.md`, `static/`, `fetched/`, `runs/<timestamp>/`.
 
@@ -25,7 +27,7 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 | Start from a clean VM | `pwsh -File scripts/reset.ps1` |
 | Run a sample with monitoring | `pwsh -File scripts/detonate.ps1 -Case <c> [-Timeout 120] [-Sample <name>] [-SampleArgs "..."] [-Export <fn>] [-KeepRunning]` |
 | Read detonation results | `cases/<c>/runs/<ts>/text/` (`procmon.csv`, `fakenet/fakenet.log`, `sysmon.json`, `processes.txt`) |
-| Run a CLI tool in the guest (capa, floss, die, ilspycmd, pe-sieve, tshark, Ghidra headless) | `vmrun_run` or `vmrun_script`, writing output under `C:\lab\out\static\` |
+| Run a CLI tool in the guest | `vmrun_run` or `vmrun_script`, writing output under `C:\lab\out\static\` |
 | Bring a guest file to the host | `pwsh -File scripts/fetch.ps1 -Case <c> -GuestPath <p> [-Text]` |
 | Look at the screen | `vmrun_screenshot` |
 
@@ -33,10 +35,41 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 spaces or quotes, write a `.ps1` (or use `vmrun_script`) instead.
 
 Before static analysis, copy the sample in with `detonate.ps1 -KeepRunning`
-or extract it inside the guest; never on the host.
+or extract it inside the guest; never on the host. Static work does not run
+the sample, so do not revert mid-analysis; fetch results (and Ghidra
+projects, zipped) before reverting.
 
-GUI tools (x64dbg, IDA, dnSpy) are driven by the user on the VMware console.
-Propose breakpoints and next steps; read what the user exports.
+## Guest tools (keys in `C:\lab\tools.json`)
+
+| Role | Tool | Use |
+|---|---|---|
+| Triage | `Diec`, `Capa`, `Floss` | packer/compiler, capabilities + ATT&CK, decoded strings (all with JSON output) |
+| Static (main) | `AnalyzeHeadless` (Ghidra 12) | import, analyze, decompile and export via Ghidra scripts |
+| .NET | `Ilspycmd`, `De4dot` | decompile to C#, deobfuscate |
+| Debugger (main) | `Cdb` (WinDbg) | scripted debugging: `cdb -c "<cmds>; q" <exe>` |
+| Dynamic (main) | `Frida`, `FridaTrace` | hook APIs with JS scripts, dump buffers and decrypted config |
+| Monitoring | `Procmon`, `Sysmon`, `Fakenet`, `Tshark` | run by `detonate.ps1`; `tshark -r` for pcaps |
+| Memory | `PeSieve`, `HollowsHunter` | dump unpacked / injected PEs |
+| Other | `SevenZip`, `upx`, `py -3.13` (pefile, yara-python), oledump/pdfid | archives, UPX, own scripts, maldocs |
+
+Ghidra and WinDbg are planned to be exposed as MCP servers (re-mcp, mcp-windbg);
+until then drive them through their CLIs as above.
+
+## Adding tools
+
+Packages outside the lean set are installed by the user, never by Claude,
+because it gives the guest Internet: `pwsh -File scripts/add-tool.ps1 -Package <name>.vm[, ...]`.
+Suggest one when a sample needs it:
+
+| Sample | Package |
+|---|---|
+| Go | `goresym.vm` |
+| PyInstaller / Python bytecode | `pycdc.vm`, `pylingual.vm` |
+| AutoIt | `autoit-ripper.vm` |
+| Delphi | `idr.vm` |
+| Electron | `asar.vm` |
+| Obfuscated JavaScript | `js-deobfuscator.vm` |
+| Manual GUI work (user) | `x64dbg.vm`, `dnspyex.vm`, `idafree.vm` |
 
 ## Safety rules
 

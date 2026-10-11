@@ -153,11 +153,13 @@ function Invoke-FlareVmPhase {
         Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mandiant/flare-vm/$($cfg.FlareVmCommit)/install.ps1" -OutFile $installer
         New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
         Copy-LabToGuest -Config $cfg -HostPath $installer -GuestPath 'C:\lab\setup\install.ps1'
+        Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates/flare-config.xml') -GuestPath 'C:\lab\setup\flare-config.xml'
         Write-LabLog 'Starting FLARE-VM install (reboots several times; 1.5 to 2 h)'
         Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @(
             '-noWait', '-interactive', 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
             '-NoProfile', '-ExecutionPolicy', 'Unrestricted', '-File', 'C:\lab\setup\install.ps1',
-            '-password', $cfg.GuestPassword, '-noWait', '-noGui', '-noChecks'
+            '-password', $cfg.GuestPassword, '-noWait', '-noGui', '-noChecks',
+            '-customConfig', 'C:\lab\setup\flare-config.xml'
         ) | Out-Null
     } else {
         Write-LabLog "FLARE-VM already started: $($state.Output)"
@@ -180,8 +182,11 @@ function Invoke-AnalysisConfigPhase {
     New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
     Copy-LabToGuest -Config $cfg -HostPath $sysmonConfig -GuestPath 'C:\lab\setup\sysmonconfig.xml'
     $r = Invoke-LabGuestScript -Config $cfg -Path (Join-Path $cfg.Root 'templates/guest/analysis-config.ps1') -Arguments @{
-        SysmonConfig = 'C:\lab\setup\sysmonconfig.xml'
-    } -TimeoutSec 1800
+        SysmonConfig       = 'C:\lab\setup\sysmonconfig.xml'
+        FridaToolsVersion  = $cfg.FridaToolsVersion
+        DotnetSdkVersion   = $cfg.DotnetSdkVersion
+        IlspyCmdVersion    = $cfg.IlspyCmdVersion
+    } -TimeoutSec 3600
     Write-LabLog $r.Output
     if ($r.ExitCode -ne 0) { throw 'analysis-config.ps1 failed' }
 

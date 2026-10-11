@@ -1,7 +1,24 @@
-# Locates analysis tools, installs Sysmon, prepares C:\lab. Runs while the guest still has NAT.
-param([string]$SysmonConfig)
+# Installs Frida and ilspycmd, locates analysis tools, installs Sysmon, prepares C:\lab.
+# Runs while the guest still has NAT.
+param([string]$SysmonConfig, [string]$FridaToolsVersion, [string]$DotnetSdkVersion, [string]$IlspyCmdVersion)
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'C:\lab\in', 'C:\lab\out', 'C:\lab\setup' | Out-Null
+
+& py -3.13 -m pip install --disable-pip-version-check --quiet "frida-tools==$FridaToolsVersion"
+if ($LASTEXITCODE -ne 0) { throw "pip install frida-tools failed (exit $LASTEXITCODE)" }
+$pythonDir = & py -3.13 -c "import os, sys; print(os.path.dirname(sys.executable))"
+
+& choco install dotnet-sdk --version $DotnetSdkVersion -y --no-progress | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "choco install dotnet-sdk failed (exit $LASTEXITCODE)" }
+$dotnetTools = 'C:\Tools\dotnet-tools'
+if (-not (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe'))) {
+    & 'C:\Program Files\dotnet\dotnet.exe' tool install ilspycmd --version $IlspyCmdVersion --tool-path $dotnetTools
+    if ($LASTEXITCODE -ne 0) { throw "dotnet tool install ilspycmd failed (exit $LASTEXITCODE)" }
+}
+
+# WinDbg ships as an MSIX package; cdb.exe lives in its install location, which cannot be searched recursively.
+$winDbg = Get-AppxPackage -Name 'Microsoft.WinDbg*' | Select-Object -First 1
+$cdb = if ($winDbg) { Join-Path $winDbg.InstallLocation 'amd64\cdb.exe' } else { $null }
 
 $roots = @('C:\Tools', 'C:\ProgramData\chocolatey\lib', 'C:\Program Files', 'C:\Program Files (x86)', 'C:\lab\setup')
 function Find-Tool([string]$Name) {
@@ -19,12 +36,24 @@ if (-not $sysmon) {
     Invoke-WebRequest -Uri 'https://live.sysinternals.com/Sysmon64.exe' -OutFile $sysmon -UseBasicParsing
 }
 $tools = [ordered]@{
-    Procmon  = Find-Tool 'Procmon64.exe'
-    Fakenet  = Find-Tool 'fakenet.exe'
-    Sysmon   = $sysmon
-    SevenZip = Find-Tool '7z.exe'
+    Procmon         = Find-Tool 'Procmon64.exe'
+    Fakenet         = Find-Tool 'fakenet.exe'
+    Sysmon          = $sysmon
+    SevenZip        = Find-Tool '7z.exe'
+    AnalyzeHeadless = Find-Tool 'analyzeHeadless.bat'
+    Cdb             = if ($cdb -and (Test-Path $cdb)) { $cdb } else { $null }
+    Frida           = Join-Path $pythonDir 'Scripts\frida.exe'
+    FridaTrace      = Join-Path $pythonDir 'Scripts\frida-trace.exe'
+    Ilspycmd        = Join-Path $dotnetTools 'ilspycmd.exe'
+    Capa            = Find-Tool 'capa.exe'
+    Floss           = Find-Tool 'floss.exe'
+    Diec            = Find-Tool 'diec.exe'
+    Tshark          = Find-Tool 'tshark.exe'
+    PeSieve         = Find-Tool 'pe-sieve64.exe'
+    HollowsHunter   = Find-Tool 'hollows_hunter64.exe'
+    De4dot          = Find-Tool 'de4dot.exe'
 }
-$missing = @($tools.Keys | Where-Object { -not $tools[$_] })
+$missing = @($tools.Keys | Where-Object { -not $tools[$_] -or -not (Test-Path $tools[$_]) })
 if ($missing) { throw "Tools not found: $($missing -join ', ')" }
 $tools | ConvertTo-Json | Set-Content -Path 'C:\lab\tools.json' -Encoding UTF8
 
