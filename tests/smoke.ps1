@@ -84,7 +84,18 @@ Test-Step '6. revlab-ghidra lists notepad functions' {
     if ($LASTEXITCODE -ne 0 -or $out -notmatch 'WinMain') { throw "no WinMain in: $out" }
 }
 
-Test-Step '7. revlab-windbg attaches to a debug launch and runs lm' {
+Test-Step '7. Ghidra renames survive save_database, case-save and a revert' {
+    $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+    $out = & $python -I $client $mcpJson revlab-ghidra ghidra-rename-save $path 'revlab_smoke_saved' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "rename/save failed: $out" }
+    if (-not (Save-LabCase -Config $config)) { throw 'no open case to save' }
+    Restore-LabClean -Config $config
+    $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+    $out = & $python -I $client $mcpJson revlab-ghidra ghidra-list $path 'revlab_smoke_saved' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $out -notmatch 'revlab_smoke_saved') { throw "rename lost after save and revert: $out" }
+}
+
+Test-Step '8. revlab-windbg attaches to a debug launch and runs lm' {
     & (Join-Path $root 'scripts/debug.ps1') -Case $notepadCase
     $out = & $python -I $client $mcpJson revlab-windbg windbg-lm 'npipe:server=.,pipe=revlab-dbg' 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0 -or $out -notmatch 'ntdll') { throw "lm without ntdll: $out" }

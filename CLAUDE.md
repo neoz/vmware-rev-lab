@@ -68,7 +68,9 @@ inside the guest and reach Claude through VMCI vSockets; the VM must be running.
   `wait_for_analysis`, `list_functions`, `decompile_function`, renames and
   comments through `revlab-ghidra`. `case-save.ps1` stores the work in
   `cases/<c>/static/ghidra.zip`; `reset.ps1`, `detonate.ps1` and
-  `collect.ps1` save the open case before reverting.
+  `collect.ps1` save the open case before reverting. They only pack what is
+  on disk: call `save_database` for every database you changed first
+  (renames, comments and types are lost otherwise).
 - Debug: `pwsh -File scripts/debug.ps1 -Case <c>` (bare) or
   `pwsh -File scripts/detonate.ps1 -Case <c> -UnderDebugger` (with monitors) leave the
   sample stopped under `cdb -server`; attach with `revlab-windbg`

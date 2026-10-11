@@ -29,6 +29,20 @@ async def run(mcp_json, name, check, args):
                 db = opened.get("database", "")
                 await s.call_tool("wait_for_analysis", {"database": db})
                 print(text(await s.call_tool("list_functions", {"database": db, "filter_pattern": args[1], "limit": 20})))
+            elif check == "ghidra-rename-save":
+                # Renames the first FUN_ function to args[1] and saves, as an analyst would before case-save.
+                db = json.loads(text(await s.call_tool("open_database", {"file_path": args[0]})))["database"]
+                await s.call_tool("wait_for_analysis", {"database": db})
+                first = json.loads(text(await s.call_tool("list_functions", {"database": db, "filter_pattern": "^FUN_", "limit": 1})))
+                await s.call_tool("rename_function", {"database": db, "address": first["items"][0]["start"], "new_name": args[1]})
+                saved = await s.call_tool("save_database", {"database": db})
+                if saved.isError:
+                    raise SystemExit(f"save_database failed: {text(saved)}")
+                print(text(saved))
+            elif check == "ghidra-list":
+                db = json.loads(text(await s.call_tool("open_database", {"file_path": args[0]})))["database"]
+                await s.call_tool("wait_for_analysis", {"database": db})
+                print(text(await s.call_tool("list_functions", {"database": db, "filter_pattern": args[1], "limit": 20})))
             elif check == "windbg-lm":
                 opened = text(await s.call_tool("open_cdb_remote", {"connection_string": args[0]}))
                 # mcp-windbg answers in text: first line "session_id: cdb-xxxxxxxx".

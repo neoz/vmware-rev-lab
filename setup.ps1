@@ -224,6 +224,7 @@ function Invoke-McpBridgePhase {
     New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\mcp'
     Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'scripts\mcp\vsock.py') -GuestPath 'C:\lab\mcp\vsock.py'
     Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates\guest\mcp\relay.py') -GuestPath 'C:\lab\mcp\relay.py'
+    Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates\guest\mcp\patch_remcp.py') -GuestPath 'C:\lab\mcp\patch_remcp.py'
     $r = Invoke-LabGuestScript -Config $cfg -Path (Join-Path $cfg.Root 'templates/guest/mcp-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
         ReMcpGhidraVersion = $cfg.ReMcpGhidraVersion; McpWindbgVersion = $cfg.McpWindbgVersion
         GhidraPort = "$($cfg.McpGhidraPort)"; WindbgPort = "$($cfg.McpWindbgPort)"; User = $cfg.GuestUser

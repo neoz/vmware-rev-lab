@@ -27,7 +27,8 @@ foreach ($venv in 'venv-ghidra', 'venv-windbg') {
     if (-not (Test-Path "$mcp\$venv\Scripts\python.exe")) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\$venv")) "venv $venv" }
 }
 Assert-Native (Invoke-Native "$mcp\venv-ghidra\Scripts\python.exe" @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "re-mcp-ghidra==$ReMcpGhidraVersion")) 'pip re-mcp-ghidra'
-Assert-Native (Invoke-Native "$mcp\venv-windbg\Scripts\python.exe" @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "mcp-windbg==$McpWindbgVersion")) 'pip mcp-windbg'
+Assert-Native (Invoke-Native "$mcp\venv-ghidra\Scripts\python.exe" @("$mcp\patch_remcp.py")) 'patch re-mcp-ghidra save'
+Assert-Native (Invoke-Native "$mcp\venv-windbg\Scripts\python.exe" @('-m', 'pip','install', '--disable-pip-version-check', '--quiet', "mcp-windbg==$McpWindbgVersion")) 'pip mcp-windbg'
 
 # analyzeHeadless.bat lives in <ghidra>\support; the FLARE OpenJDK provides java.exe.
 $ghidraDir = Split-Path (Split-Path $tools.AnalyzeHeadless)
