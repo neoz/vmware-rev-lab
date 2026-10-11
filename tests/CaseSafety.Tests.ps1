@@ -74,6 +74,41 @@ Describe 'Restore-LabClean case handling' {
     }
 }
 
+Describe 'Pending debug run' {
+    It 'hands the run of a -UnderDebugger detonation to collect.ps1' {
+        $cfg = New-TestConfig
+        Set-LabDebugRun -Config $cfg -Case 'c1' -RunDir 'D:\runs\1' -Start '2026-10-12T10:00:00'
+        $run = Get-LabDebugRun -Config $cfg -Case 'c1'
+        $run.RunDir | Should -Be 'D:\runs\1'
+        $run.Start | Should -Be '2026-10-12T10:00:00'
+    }
+
+    It 'refuses to collect another case''s run' {
+        $cfg = New-TestConfig
+        Set-LabDebugRun -Config $cfg -Case 'c1' -RunDir 'D:\runs\1' -Start 's'
+        { Get-LabDebugRun -Config $cfg -Case 'c2' } | Should -Throw -ExpectedMessage "*'c1'*"
+    }
+
+    It 'is gone after a revert, so collect.ps1 cannot collect a clean guest into an old run' {
+        $cfg = New-TestConfig
+        $vmx = Join-Path $cfg.Root 'x.vmx'
+        Set-Content $vmx @('ethernet0.connectionType = "pvn"', 'ethernet0.pvnID = "52 01"')
+        $cfg.VmxPath = $vmx; $cfg.SnapshotName = 'clean'; $cfg.AnalysisPvnId = '52 01'
+        Mock Start-Sleep -ModuleName LabCommon {}
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Mock Invoke-Vmrun -ModuleName LabCommon { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
+        Set-LabDebugRun -Config $cfg -Case 'c1' -RunDir 'D:\runs\1' -Start 's'
+        Restore-LabClean -Config $cfg
+        { Get-LabDebugRun -Config $cfg -Case 'c1' } | Should -Throw -ExpectedMessage '*No pending debug run*'
+    }
+}
+
+Describe 'Relay logon tasks' {
+    It 'keep running when the host is on battery' {
+        Get-Content "$PSScriptRoot/../templates/guest/mcp-install.ps1" -Raw | Should -Match 'New-ScheduledTaskSettingsSet[^\r\n]*-DontStopIfGoingOnBatteries'
+    }
+}
+
 Describe 'Start-LabSample marks that a sample ran' {
     It 'writes the host marker before launching' {
         $cfg = New-TestConfig

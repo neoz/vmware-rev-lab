@@ -31,20 +31,24 @@ def read_password(local_text):
     return match.group(1).replace("''", "'")
 
 
-def connect_with_retry(connect, start_relay, attempts=3, delay=10, sleep=time.sleep):
+def connect_with_retry(connect, start_relay, attempts=3, delay=5, budget=25, sleep=time.sleep, clock=time.monotonic):
+    # Claude Code abandons a server that has not answered initialize in about 30 s; fail inside that budget
+    # (VM paused or mid-revert) so the error message reaches the analyst.
+    end = clock() + budget
     last = None
     for attempt in range(attempts):
         try:
             return connect()
         except OSError as exc:
             last = exc
-            if attempt == 0:
-                try:
-                    start_relay()
-                except Exception:
-                    pass
-            if attempt < attempts - 1:
-                sleep(delay)
+        if attempt == 0:
+            try:
+                start_relay(timeout=max(1, end - clock()))
+            except Exception:
+                pass
+        if attempt == attempts - 1 or clock() + delay >= end:
+            break
+        sleep(delay)
     raise last
 
 
@@ -170,11 +174,11 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
 
-    def start_relay():
+    def start_relay(timeout):
         password = read_password(open(args.local_config, encoding="utf-8-sig").read())
         subprocess.run([args.vmrun, "-T", "ws", "-gu", args.guest_user, "-gp", password, "runProgramInGuest", args.vmx,
                         r"C:\Windows\System32\schtasks.exe", "/run", "/tn", args.task],
-                       capture_output=True, timeout=120, creationflags=0x08000000)
+                       capture_output=True, timeout=timeout, creationflags=0x08000000)
 
     def connect():
         cid = read_cid(open(args.vmx, encoding="utf-8", errors="replace").read())

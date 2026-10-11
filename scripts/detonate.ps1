@@ -54,8 +54,7 @@ try {
     Start-LabSample -Config $config -SamplePath $samplePath -RunDir $runDir -Export $Export -SampleArgs $SampleArgs -Debugger $debugger
     $sampleStarted = $true
     if ($UnderDebugger) {
-        Set-Content -Path (Join-Path $runDir 'monitor-start.txt') -Value $start
-        Set-Content -Path (Join-Path $caseDir 'runs/pending.txt') -Value $runDir
+        Set-LabDebugRun -Config $config -Case $Case -RunDir $runDir -Start $start
         Write-LabLog "Sample is stopped under cdb. Attach with revlab-windbg open_cdb_remote 'npipe:server=.,pipe=revlab-dbg'."
         Write-LabLog "When done: .\scripts\collect.ps1 -Case $Case"
         $debugRun = $true

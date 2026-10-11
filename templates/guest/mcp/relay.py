@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 GRACE_SECONDS = 30
 
@@ -38,7 +39,9 @@ def serve_connection(conn, command, env, child_log=None):
     try:
         if child_log:
             err = open(child_log, "ab")
-        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=env)
+        # No console window: under pythonw each console child would pop one on the guest desktop.
+        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=env,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception:
         # The host must see the connection close instead of waiting on a server that never started.
         conn.close()
@@ -74,7 +77,13 @@ def serve_connection(conn, command, env, child_log=None):
 def run(listener, command, env, child_log=None):
     busy = threading.Lock()
     while True:
-        conn = listener.accept()
+        try:
+            conn = listener.accept()
+        except OSError:
+            # One client aborting mid-handshake must not take the relay down until the next logon.
+            logging.exception("accept failed")
+            time.sleep(1)
+            continue
         if not busy.acquire(blocking=False):
             # One session per port: two clients must not drive one Ghidra project or debugger.
             conn.close()

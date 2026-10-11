@@ -36,7 +36,7 @@ class RetryTests(unittest.TestCase):
                 raise OSError("refused")
             return "sock"
 
-        def start():
+        def start(timeout):
             calls["start"] += 1
 
         self.assertEqual(bridge.connect_with_retry(connect, start, attempts=3, sleep=lambda s: None), "sock")
@@ -47,7 +47,25 @@ class RetryTests(unittest.TestCase):
             raise OSError("refused")
 
         with self.assertRaises(OSError):
-            bridge.connect_with_retry(connect, lambda: None, attempts=2, sleep=lambda s: None)
+            bridge.connect_with_retry(connect, lambda timeout: None, attempts=2, sleep=lambda s: None)
+
+    def test_answers_within_the_startup_budget_when_the_guest_hangs(self):
+        # Claude Code abandons a server that has not answered initialize in about 30 s.
+        now = [0.0]
+
+        def connect():
+            now[0] += 1
+            raise OSError("refused")
+
+        def start(timeout):
+            now[0] += timeout  # vmrun hangs until its timeout (VM paused or mid-revert)
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        with self.assertRaises(OSError):
+            bridge.connect_with_retry(connect, start, budget=25, sleep=sleep, clock=lambda: now[0])
+        self.assertLessEqual(now[0], 27)
 
 
 class ErrorReplyTests(unittest.TestCase):

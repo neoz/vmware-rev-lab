@@ -1,8 +1,10 @@
 import socket
+import subprocess
 import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "templates" / "guest" / "mcp"))
@@ -131,6 +133,35 @@ class RelayTests(unittest.TestCase):
         with connect(listener.port) as c:
             c.sendall(b"hi\n")
             assert_closed(self, c)
+
+    def test_accept_error_does_not_stop_the_relay(self):
+        listener = TcpListener()
+        real_accept, failures = listener.accept, [OSError(10054, "reset during accept")]
+
+        def flaky_accept():
+            if failures:
+                raise failures.pop()
+            return real_accept()
+
+        listener.accept = flaky_accept
+        threading.Thread(target=relay.run, args=(listener, CHILD, None), daemon=True).start()
+        with connect(listener.port) as c:
+            self.assertTrue(ask(c, "after").endswith("after\n"))
+
+    def test_child_gets_no_console_window(self):
+        # Under pythonw every console child would pop a window on the guest desktop (and in screenshots).
+        seen = []
+        real_popen = subprocess.Popen
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs.get("creationflags", 0))
+            return real_popen(*args, **kwargs)
+
+        port = start_relay()
+        with mock.patch.object(relay.subprocess, "Popen", spy):
+            with connect(port) as c:
+                ask(c, "x")
+        self.assertEqual(seen, [subprocess.CREATE_NO_WINDOW])
 
     def test_child_exit_closes_connection(self):
         port = start_relay()

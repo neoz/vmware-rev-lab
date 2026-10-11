@@ -27,7 +27,9 @@ def parse_af(catalog_text: str) -> int:
 
 
 def af_value() -> int:
-    out = subprocess.run(["netsh", "winsock", "show", "catalog"], capture_output=True, text=True, check=True).stdout
+    # No console window: the guest relay runs under pythonw and a window would show on the desktop.
+    out = subprocess.run(["netsh", "winsock", "show", "catalog"], capture_output=True, text=True, check=True,
+                         creationflags=subprocess.CREATE_NO_WINDOW).stdout
     return parse_af(out)
 
 

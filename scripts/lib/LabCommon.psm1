@@ -858,7 +858,29 @@ function Set-LabCurrentCase {
 
 function Clear-LabRunState {
     param([Parameter(Mandatory)][hashtable]$Config)
-    Remove-Item -Path (Join-Path $Config.LabDir 'current-case.txt'), (Join-Path $Config.LabDir 'sample-ran.txt') -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $Config.LabDir 'current-case.txt'), (Join-Path $Config.LabDir 'sample-ran.txt'),
+        (Join-Path $Config.LabDir 'debug-run.txt') -ErrorAction SilentlyContinue
+}
+
+function Set-LabDebugRun {
+    # A 'detonate.ps1 -UnderDebugger' run waiting for collect.ps1; cleared by every revert.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case,
+        [Parameter(Mandatory)][string]$RunDir, [Parameter(Mandatory)][string]$Start)
+    Assert-LabCaseName $Case
+    New-Item -ItemType Directory -Force -Path $Config.LabDir | Out-Null
+    # Plain lines, not JSON: ConvertFrom-Json on 7.2 turns the Start timestamp into a DateTime.
+    Set-Content -Path (Join-Path $Config.LabDir 'debug-run.txt') -Value @($Case, $RunDir, $Start) -Encoding utf8
+}
+
+function Get-LabDebugRun {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    $path = Join-Path $Config.LabDir 'debug-run.txt'
+    if (-not (Test-Path $path)) {
+        throw "No pending debug run: none was started, or the VM was reverted since (its monitor data is gone)."
+    }
+    $owner, $runDir, $start = Get-Content -Path $path
+    if ($owner -ne $Case) { throw "The pending debug run belongs to case '$owner', not '$Case'." }
+    [pscustomobject]@{ Case = $owner; RunDir = $runDir; Start = $start }
 }
 
 function Save-LabCase {
