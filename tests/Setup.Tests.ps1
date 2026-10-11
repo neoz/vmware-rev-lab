@@ -33,14 +33,31 @@ Describe 'Assert-LabVmAbsent' {
 }
 
 Describe 'New-LabMcpJson' {
-    It 'points at the venv entry point and sets vmrun/vmcli paths' {
-        $cfg = @{ Root = 'D:\lab'; Vmrun = 'C:\VMware\vmrun.exe'; Vmcli = 'C:\VMware\vmcli.exe' }
+    BeforeAll {
+        $cfg = @{ Root = 'D:\lab'; Vmrun = 'C:\VMware\vmrun.exe'; Vmcli = 'C:\VMware\vmcli.exe'; VmxPath = 'D:\vm\revlab.vmx'
+                  GuestUser = 'analyst'; McpGhidraPort = 5001; McpWindbgPort = 5002 }
         $json = New-LabMcpJson -Config $cfg | ConvertFrom-Json
+    }
+
+    It 'points vmware-mcp at the venv entry point and sets vmrun/vmcli paths' {
         $server = $json.mcpServers.'vmware-mcp'
         $server.command | Should -Be 'D:\lab\tools\vmware-mcp\.venv\Scripts\vmware-mcp.exe'
         $server.env.VMRUN_PATH | Should -Be 'C:\VMware\vmrun.exe'
         $server.env.VMCLI_PATH | Should -Be 'C:\VMware\vmcli.exe'
         $server.env.VMWARE_USERNAME | Should -Be '${VMWARE_USERNAME:-}'
+    }
+
+    It 'adds the two vSocket bridges with their port and relay task' {
+        foreach ($case in @(@{ Name = 'revlab-ghidra'; Port = '5001'; Task = 'RevlabMcpGhidra' },
+                            @{ Name = 'revlab-windbg'; Port = '5002'; Task = 'RevlabMcpWindbg' })) {
+            $server = $json.mcpServers.($case.Name)
+            $server.command | Should -Be 'D:\lab\tools\vmware-mcp\.venv\Scripts\python.exe'
+            $server.args[0] | Should -Be '-I'
+            $server.args[1] | Should -Be 'D:\lab\scripts\mcp\revlab_bridge.py'
+            ($server.args -join ' ') | Should -Match "--port $($case.Port) --task $($case.Task) "
+            ($server.args -join ' ') | Should -Match '--vmx D:\\vm\\revlab.vmx'
+            ($server.args -join ' ') | Should -Match '--local-config D:\\lab\\lab.local.psd1'
+        }
     }
 }
 

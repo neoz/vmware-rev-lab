@@ -36,6 +36,11 @@ Describe 'Get-LabVmxSettings' {
         }
     }
 
+    It 'has a VMCI device for the MCP vSocket bridge' {
+        $s['vmci0.present'] | Should -Be 'TRUE'
+        $s.Contains('vmci0.unrestricted') | Should -BeFalse
+    }
+
     It 'starts on NAT for setup' {
         $s['ethernet0.connectionType'] | Should -Be 'nat'
     }

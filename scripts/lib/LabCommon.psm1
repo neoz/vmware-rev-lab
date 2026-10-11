@@ -239,6 +239,7 @@ function Get-LabVmxSettings {
         'isolation.tools.paste.disable' = 'TRUE'
         'sharedFolder.maxNum'           = '0'
         'tools.syncTime'                = 'FALSE'
+        'vmci0.present'                 = 'TRUE'
     }
     # PCIe devices such as the e1000e NIC need root ports, or the VM stops at "No PCIe slot available".
     foreach ($i in 4..7) {
@@ -610,9 +611,21 @@ function Assert-LabVmAbsent {
 
 function New-LabMcpJson {
     param([Parameter(Mandatory)][hashtable]$Config)
+    $python = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\python.exe'
+    $bridge = Join-Path $Config.Root 'scripts\mcp\revlab_bridge.py'
+    $local = Join-Path $Config.Root 'lab.local.psd1'
+    $bridgeServer = {
+        param([int]$Port, [string]$Task)
+        [ordered]@{
+            type    = 'stdio'
+            command = $python
+            args    = @('-I', $bridge, '--port', "$Port", '--task', $Task, '--vmx', $Config.VmxPath,
+                        '--vmrun', $Config.Vmrun, '--guest-user', $Config.GuestUser, '--local-config', $local)
+        }
+    }
     [ordered]@{
         mcpServers = [ordered]@{
-            'vmware-mcp' = [ordered]@{
+            'vmware-mcp'    = [ordered]@{
                 type    = 'stdio'
                 command = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\vmware-mcp.exe'
                 args    = @()
@@ -623,6 +636,8 @@ function New-LabMcpJson {
                     VMWARE_PASSWORD = '${VMWARE_PASSWORD:-}'
                 }
             }
+            'revlab-ghidra' = & $bridgeServer $Config.McpGhidraPort 'RevlabMcpGhidra'
+            'revlab-windbg' = & $bridgeServer $Config.McpWindbgPort 'RevlabMcpWindbg'
         }
     } | ConvertTo-Json -Depth 5
 }

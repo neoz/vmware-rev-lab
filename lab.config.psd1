@@ -21,5 +21,9 @@
     FridaToolsVersion = '14.11.0'
     DotnetSdkVersion  = '10.0.401'
     IlspyCmdVersion   = '11.1.0.9782'
+    ReMcpGhidraVersion = '3.0.3'
+    McpWindbgVersion   = '1.5.1'
+    McpGhidraPort      = 5001
+    McpWindbgPort      = 5002
     SysmonConfigUrl = 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/1836897f12fbd6a0a473665ef6abc34a6b497e31/sysmonconfig-export.xml'
 }
