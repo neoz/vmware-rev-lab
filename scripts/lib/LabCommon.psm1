@@ -293,3 +293,75 @@ function Remove-LabVmxInstallMedia {
     foreach ($key in @($settings.Keys | Where-Object { $_ -match '^sata0:[123]\.' })) { $settings.Remove($key) }
     Write-LabVmx $Config $settings
 }
+
+function ConvertTo-LabUnattendXml {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$TemplatePath
+    )
+    $escape = { param($v) [System.Security.SecurityElement]::Escape([string]$v) }
+    $text = Get-Content -Path $TemplatePath -Raw
+    $text = $text.Replace('{{GUEST_USER}}', (& $escape $Config.GuestUser))
+    $text = $text.Replace('{{GUEST_PASSWORD}}', (& $escape $Config.GuestPassword))
+    $text = $text.Replace('{{COMPUTER_NAME}}', (& $escape $Config.ComputerName))
+    if ($text -match '\{\{[A-Z_]+\}\}') { throw "Unfilled placeholder in ${TemplatePath}: $($Matches[0])" }
+    $text
+}
+
+function New-LabIso {
+    param(
+        [Parameter(Mandatory)][string]$SourceDir,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$VolumeName = 'ANSWER'
+    )
+    if (-not ('LabIsoWriter' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+
+public static class LabIsoWriter {
+    public static void Write(object comStream, string path) {
+        IStream stream = (IStream)comStream;
+        byte[] buffer = new byte[65536];
+        IntPtr readPtr = Marshal.AllocHGlobal(sizeof(int));
+        try {
+            using (FileStream file = File.Create(path)) {
+                while (true) {
+                    stream.Read(buffer, buffer.Length, readPtr);
+                    int read = Marshal.ReadInt32(readPtr);
+                    if (read == 0) break;
+                    file.Write(buffer, 0, read);
+                }
+            }
+        } finally {
+            Marshal.FreeHGlobal(readPtr);
+        }
+    }
+}
+'@
+    }
+    $image = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
+    $image.FileSystemsToCreate = 3  # ISO9660 + Joliet
+    $image.VolumeName = $VolumeName
+    $image.Root.AddTree((Resolve-Path $SourceDir).Path, $false)
+    $result = $image.CreateResultImage()
+    if (Test-Path $Path) { Remove-Item $Path -Force }
+    [LabIsoWriter]::Write($result.ImageStream, $Path)
+}
+
+function New-LabAnswerIso {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $staging = Join-Path $Config.LabDir 'answer-staging'
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $staging 'answer') | Out-Null
+    $xml = ConvertTo-LabUnattendXml -Config $Config -TemplatePath (Join-Path $Config.Root 'templates/autounattend.xml')
+    Set-Content -Path (Join-Path $staging 'autounattend.xml') -Value $xml -Encoding utf8
+    Copy-Item -Path (Join-Path $Config.Root 'templates/answer/*') -Destination (Join-Path $staging 'answer')
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    New-LabIso -SourceDir $staging -Path $Path
+}
