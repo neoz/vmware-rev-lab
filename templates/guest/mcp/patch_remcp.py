@@ -4,7 +4,7 @@ GhidraProject keeps a transaction open on every program it opens or imports. Ses
 df.save() for a program that already has a file, which fails with "Unable to lock due to active
 transaction", so renames, comments and types never reach disk. GhidraProject.save() ends that
 transaction, saves and restarts it. Patching the file (not monkeypatching) also covers the worker
-processes re-mcp starts per database.
+processes re-mcp starts per database. Upstream: https://github.com/jtsylve/re-mcp/issues/55
 """
 import sys
 from pathlib import Path
