@@ -17,9 +17,13 @@ BeforeAll {
 Describe '.claude/settings.json' {
     It 'denies the user-only network scripts and direct VM config or vmrun access' {
         foreach ($rule in 'Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)',
-                          'Bash(*vmrun*)', 'PowerShell(*vmrun*)', 'Edit(**/*.vmx)', 'Write(**/*.vmx)') {
+                          'Bash(*vmrun*)', 'PowerShell(*vmrun*)', 'Edit(**/*.vmx)') {
             $settings.permissions.deny | Should -Contain $rule
         }
+    }
+
+    It 'uses only Edit(path) for file rules (Claude Code ignores Write(path) and warns on start)' {
+        $settings.permissions.deny + $settings.permissions.allow | Where-Object { $_ -like 'Write(*' } | Should -BeNullOrEmpty
     }
 
     It 'never allows and denies the same tool' {

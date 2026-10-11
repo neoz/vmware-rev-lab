@@ -70,8 +70,7 @@
       "PowerShell(*add-tool.ps1*)",
       "Bash(*vmrun*)",
       "PowerShell(*vmrun*)",
-      "Edit(**/*.vmx)",
-      "Write(**/*.vmx)"
+      "Edit(**/*.vmx)"
     ]
   }
 }
