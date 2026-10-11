@@ -4,5 +4,5 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name reset | Out-Null
-Restore-LabClean -Config $config
+Restore-LabClean -Config $config -SaveCase
 Write-LabLog "Reverted to '$($config.SnapshotName)'"

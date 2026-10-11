@@ -584,7 +584,9 @@ function Update-LabSnapshot {
 }
 
 function Restore-LabClean {
-    param([Parameter(Mandatory)][hashtable]$Config)
+    param([Parameter(Mandatory)][hashtable]$Config, [switch]$SaveCase)
+    # Saving first means a failed save stops here, before any work in the guest is lost.
+    if ($SaveCase -and (Test-LabVmRunning -Config $Config)) { Save-LabCase -Config $Config | Out-Null }
     Invoke-Vmrun -Config $Config -Command revertToSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 600 | Out-Null
     $mode = Get-LabVmxNetworkMode -Config $Config
     if ($mode -ne 'Analysis') {
@@ -817,4 +819,66 @@ function Test-LabMcpBridge {
         (Join-Path $Config.Root '.mcp.json'), $Server, 'count') -TimeoutSec 300
     if ($r.ExitCode -ne 0 -or $r.StdOut -notmatch 'tools=(\d+)') { throw "MCP bridge '$Server' failed: $($r.StdOut) $($r.StdErr)" }
     [int]$Matches[1]
+}
+
+function Test-LabGuestDirectory {
+    # vmrun exits non-zero when the directory is missing (see New-LabGuestDirectory).
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath)
+    try {
+        (Invoke-Vmrun -Config $Config -Command directoryExistsInGuest -Arguments @($GuestPath) -Guest -RetryCount 0).Output -match 'The directory exists'
+    } catch { $false }
+}
+
+function Get-LabCurrentCase {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if (-not (Test-LabGuestFile -Config $Config -GuestPath 'C:\lab\current-case.txt')) { return $null }
+    $local = Join-Path ([System.IO.Path]::GetTempPath()) "current-case-$([guid]::NewGuid().ToString('N')).txt"
+    try {
+        Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\current-case.txt' -HostPath $local
+        $case = (Get-Content -Path $local -Raw).Trim()
+    } finally { Remove-Item $local -ErrorAction SilentlyContinue }
+    Assert-LabCaseName $case
+    $case
+}
+
+function Save-LabCase {
+    # Zips the guest's C:\lab\in\sample (sample + re-mcp databases) into cases/<case>/static/ghidra.zip.
+    param([Parameter(Mandatory)][hashtable]$Config, [string]$Case)
+    if (-not $Case) { $Case = Get-LabCurrentCase -Config $Config }
+    if (-not $Case) { return $false }
+    Assert-LabCaseName $Case
+    if (-not (Test-LabGuestDirectory -Config $Config -GuestPath 'C:\lab\in\sample')) {
+        Write-LabLog "Case '$Case' has no C:\lab\in\sample in the guest; nothing to save"
+        return $false
+    }
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/pack.ps1') -Arguments @{
+        Source = 'C:\lab\in\sample'; Destination = 'C:\lab\tmp\case.zip'
+    }
+    if ($r.ExitCode -ne 0) { throw "Saving case '$Case' failed: $($r.Output)" }
+    $dest = Join-Path $Config.Root "cases/$Case/static"
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    $tmp = Join-Path $dest 'ghidra.zip.part'
+    Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\tmp\case.zip' -HostPath $tmp
+    Move-Item -Path $tmp -Destination (Join-Path $dest 'ghidra.zip') -Force
+    Write-LabLog "Saved case '$Case' to $(Join-Path $dest 'ghidra.zip')"
+    $true
+}
+
+function Open-LabCase {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case, [string]$Name)
+    Assert-LabCaseName $Case
+    $caseDir = Join-Path $Config.Root "cases/$Case"
+    $saved = Join-Path $caseDir 'static/ghidra.zip'
+    if (Test-Path $saved) {
+        $zip = $saved; $destination = 'C:\lab\in'            # holds sample\... from pack.ps1
+    } else {
+        $zip = Join-Path $caseDir 'sample.zip'; $destination = 'C:\lab\in\sample'
+        if (-not (Test-Path $zip)) { throw "Missing $zip (zip the sample with password 'infected')" }
+    }
+    Copy-LabToGuest -Config $Config -HostPath $zip -GuestPath 'C:\lab\in\case.zip'
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/case-unpack.ps1') -Arguments @{
+        Zip = 'C:\lab\in\case.zip'; Destination = $destination; Case = $Case; Name = "$Name"
+    }
+    if ($r.ExitCode -ne 0) { throw "Opening case '$Case' failed: $($r.Output)" }
+    ($r.Output -split "`r?`n")[-1].Trim()
 }
