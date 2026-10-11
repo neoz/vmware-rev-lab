@@ -365,3 +365,202 @@ function New-LabAnswerIso {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
     New-LabIso -SourceDir $staging -Path $Path
 }
+
+$script:GuestPowerShell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+$script:GuestTmp = 'C:\lab\tmp'
+
+function Wait-LabCondition {
+    param(
+        [Parameter(Mandatory)][string]$Description,
+        [Parameter(Mandatory)][scriptblock]$Condition,
+        [int]$TimeoutSec = 600,
+        [int]$PollSec = 10
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        if (& $Condition) { return }
+        if ((Get-Date) -ge $deadline) { throw "Timed out after $TimeoutSec s waiting for: $Description" }
+        Start-Sleep -Seconds $PollSec
+    }
+}
+
+function Test-LabVmRunning {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $lines = (Invoke-Vmrun -Config $Config -Command list -NoVmx).Output -split "`r?`n"
+    $lines -contains $Config.VmxPath
+}
+
+function Start-LabVm {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if (-not (Test-LabVmRunning -Config $Config)) {
+        Invoke-Vmrun -Config $Config -Command start -Arguments @('gui') | Out-Null
+    }
+}
+
+function Stop-LabVm {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if (Test-LabVmRunning -Config $Config) {
+        Invoke-Vmrun -Config $Config -Command stop -Arguments @('soft') -TimeoutSec 600 | Out-Null
+    }
+    Wait-LabCondition -Description 'VM power off' -TimeoutSec 300 -Condition { -not (Test-LabVmRunning -Config $Config) }
+}
+
+function Wait-LabTools {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [int]$TimeoutSec = 600,
+        [int]$PollSec = 10
+    )
+    Wait-LabCondition -Description 'VMware Tools running' -TimeoutSec $TimeoutSec -PollSec $PollSec -Condition {
+        try { (Invoke-Vmrun -Config $Config -Command checkToolsState -RetryCount 0).Output -match 'running' } catch { $false }
+    }
+}
+
+function Test-LabGuestFile {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath)
+    try {
+        (Invoke-Vmrun -Config $Config -Command fileExistsInGuest -Arguments @($GuestPath) -Guest -RetryCount 0).Output -match 'The file exists'
+    } catch { $false }
+}
+
+function New-LabGuestDirectory {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath)
+    $exists = (Invoke-Vmrun -Config $Config -Command directoryExistsInGuest -Arguments @($GuestPath) -Guest).Output
+    if ($exists -notmatch 'The directory exists') {
+        Invoke-Vmrun -Config $Config -Command createDirectoryInGuest -Arguments @($GuestPath) -Guest | Out-Null
+    }
+}
+
+function Copy-LabToGuest {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$HostPath, [Parameter(Mandatory)][string]$GuestPath)
+    Invoke-Vmrun -Config $Config -Command copyFileFromHostToGuest -Arguments @($HostPath, $GuestPath) -Guest -TimeoutSec 900 | Out-Null
+}
+
+function Copy-LabFromGuest {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath, [Parameter(Mandatory)][string]$HostPath)
+    Invoke-Vmrun -Config $Config -Command copyFileFromGuestToHost -Arguments @($GuestPath, $HostPath) -Guest -TimeoutSec 900 | Out-Null
+}
+
+function Copy-LabGuestScript {
+    # Copies a script and a wrapper that runs it with literal arguments and captures all output.
+    param([hashtable]$Config, [string]$Path, [hashtable]$Arguments)
+    $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $guest = @{
+        Script  = "$script:GuestTmp\$name-$id.ps1"
+        Wrapper = "$script:GuestTmp\wrap-$id.ps1"
+        Output  = "$script:GuestTmp\$name-$id.out"
+    }
+    $argText = ($Arguments.Keys | ForEach-Object {
+        "-$_ '$(([string]$Arguments[$_]) -replace "'", "''")'"
+    }) -join ' '
+    $wrapper = @"
+`$code = 0
+try {
+    & '$($guest.Script)' $argText *> '$($guest.Output)'
+    if (`$LASTEXITCODE) { `$code = `$LASTEXITCODE }
+} catch {
+    `$_ | Out-String | Add-Content -Path '$($guest.Output)'
+    `$code = 1
+}
+exit `$code
+"@
+    $hostWrapper = Join-Path ([System.IO.Path]::GetTempPath()) "wrap-$id.ps1"
+    Set-Content -Path $hostWrapper -Value $wrapper -Encoding utf8BOM
+    try {
+        New-LabGuestDirectory -Config $Config -GuestPath $script:GuestTmp
+        Copy-LabToGuest -Config $Config -HostPath $Path -GuestPath $guest.Script
+        Copy-LabToGuest -Config $Config -HostPath $hostWrapper -GuestPath $guest.Wrapper
+    } finally {
+        Remove-Item -Path $hostWrapper -ErrorAction SilentlyContinue
+    }
+    $guest
+}
+
+function Invoke-LabGuestScript {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Path,
+        [hashtable]$Arguments = @{},
+        [switch]$Interactive,
+        [int]$TimeoutSec = 600
+    )
+    $guest = Copy-LabGuestScript -Config $Config -Path $Path -Arguments $Arguments
+    $runArgs = @()
+    if ($Interactive) { $runArgs += '-interactive' }
+    $runArgs += @($script:GuestPowerShell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $guest.Wrapper)
+    $result = Invoke-Vmrun -Config $Config -Command runProgramInGuest -Arguments $runArgs -Guest -TimeoutSec $TimeoutSec
+
+    $localOut = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetFileName($guest.Output))
+    try {
+        Copy-LabFromGuest -Config $Config -GuestPath $guest.Output -HostPath $localOut
+        $output = (Get-Content -Path $localOut -Raw)
+    } catch {
+        $output = "(no output captured: $($_.Exception.Message))"
+    } finally {
+        Remove-Item -Path $localOut -ErrorAction SilentlyContinue
+    }
+    [pscustomobject]@{ ExitCode = $result.GuestExitCode; Output = "$output".Trim() }
+}
+
+function Start-LabGuestScript {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Path,
+        [hashtable]$Arguments = @{}
+    )
+    $guest = Copy-LabGuestScript -Config $Config -Path $Path -Arguments $Arguments
+    Invoke-Vmrun -Config $Config -Command runProgramInGuest -Guest -Arguments @(
+        '-noWait', '-interactive', $script:GuestPowerShell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $guest.Wrapper
+    ) | Out-Null
+}
+
+function Get-LabGuestBootTime {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/get-boot-time.ps1')
+    if ($r.ExitCode -ne 0) { throw "get-boot-time.ps1 failed: $($r.Output)" }
+    $r.Output
+}
+
+function Restart-LabGuest {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $before = Get-LabGuestBootTime -Config $Config
+    Write-LabLog "Restarting guest (booted $before)"
+    Invoke-Vmrun -Config $Config -Command reset -Arguments @('soft') | Out-Null
+    Wait-LabCondition -Description 'guest reboot' -TimeoutSec 900 -PollSec 15 -Condition {
+        try { $now = Get-LabGuestBootTime -Config $Config; $now -and $now -ne $before } catch { $false }
+    }
+}
+
+function Wait-LabDesktop {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    Wait-LabCondition -Description 'user desktop (explorer.exe)' -TimeoutSec 600 -PollSec 10 -Condition {
+        try { (Invoke-Vmrun -Config $Config -Command listProcessesInGuest -Guest -RetryCount 0).Output -match 'explorer\.exe' } catch { $false }
+    }
+}
+
+function Get-LabSnapshots {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $lines = (Invoke-Vmrun -Config $Config -Command listSnapshots).Output -split "`r?`n"
+    @($lines | Select-Object -Skip 1 | Where-Object { $_.Trim() })
+}
+
+function Update-LabSnapshot {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if ($Config.SnapshotName -in (Get-LabSnapshots -Config $Config)) {
+        Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 1800 | Out-Null
+    }
+    Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($Config.SnapshotName) -TimeoutSec 1800 | Out-Null
+    Write-LabLog "Snapshot '$($Config.SnapshotName)' taken"
+}
+
+function Restore-LabClean {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    Invoke-Vmrun -Config $Config -Command revertToSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 600 | Out-Null
+    $mode = Get-LabVmxNetworkMode -Config $Config
+    if ($mode -ne 'Analysis') {
+        throw "VM network is '$mode', not on the analysis LAN segment. Refusing to resume. Run .\scripts\net.ps1 -Mode Analysis first."
+    }
+    Start-LabVm -Config $Config
+    Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
+}
