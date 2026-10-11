@@ -32,8 +32,14 @@ while (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) {
 }
 $dotnetTools = 'C:\Tools\dotnet-tools'
 if (-not (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe'))) {
-    & 'C:\Program Files\dotnet\dotnet.exe' tool install ilspycmd --version $IlspyCmdVersion --tool-path $dotnetTools
-    if ($LASTEXITCODE -ne 0) { throw "dotnet tool install ilspycmd failed (exit $LASTEXITCODE)" }
+    # dotnet prints its first-run banner on stderr; under 'Stop' Windows PowerShell turns that into an error.
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    $ErrorActionPreference = 'Continue'
+    $dotnetOut = & 'C:\Program Files\dotnet\dotnet.exe' tool install ilspycmd --version $IlspyCmdVersion --tool-path $dotnetTools 2>&1 | Out-String
+    $dotnetExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($dotnetExit -ne 0) { throw "dotnet tool install ilspycmd failed (exit $dotnetExit):`n$dotnetOut" }
 }
 
 # WinDbg ships as an MSIX package; cdb.exe lives in its install location, which cannot be searched recursively.
