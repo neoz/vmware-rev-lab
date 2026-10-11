@@ -18,8 +18,18 @@ if ((Get-WindowsOptionalFeature -Online -FeatureName NetFx3).State -ne 'Enabled'
 if ($LASTEXITCODE -ne 0) { throw "pip install frida-tools failed (exit $LASTEXITCODE)" }
 $pythonDir = & py -3.13 -c "import os, sys; print(os.path.dirname(sys.executable))"
 
-& choco install dotnet-sdk --version $DotnetSdkVersion -y --no-progress | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "choco install dotnet-sdk failed (exit $LASTEXITCODE)" }
+# community.chocolatey.org answers 504 now and then, so retry; skip when the SDK is already there.
+$attempt = 0
+while (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) {
+    $attempt++
+    $chocoOut = & choco install dotnet-sdk --version $DotnetSdkVersion -y --no-progress 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        if (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) { throw "dotnet SDK $DotnetSdkVersion missing after install:`n$chocoOut" }
+        continue
+    }
+    if ($attempt -ge 3) { throw "choco install dotnet-sdk failed (exit $LASTEXITCODE):`n$chocoOut" }
+    Start-Sleep -Seconds 30
+}
 $dotnetTools = 'C:\Tools\dotnet-tools'
 if (-not (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe'))) {
     & 'C:\Program Files\dotnet\dotnet.exe' tool install ilspycmd --version $IlspyCmdVersion --tool-path $dotnetTools
