@@ -47,3 +47,101 @@ function New-LabPassword {
     } until ($password -cmatch '[A-Z]' -and $password -cmatch '[a-z]' -and $password -match '[0-9]')
     $password
 }
+
+$script:LogFile = $null
+
+function Start-LabLog {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $dir = Join-Path $Config.LabDir 'logs'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $script:LogFile = Join-Path $dir ('{0}-{1:yyyyMMdd-HHmmss}.log' -f $Name, (Get-Date))
+    $script:LogFile
+}
+
+function Get-LabLogPath { $script:LogFile }
+
+function Write-LabLog {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Message,
+        [switch]$Quiet
+    )
+    $line = '[{0:HH:mm:ss}] {1}' -f (Get-Date), $Message
+    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value $line }
+    if (-not $Quiet) { Write-Host $line }
+}
+
+function Invoke-LabProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [int]$TimeoutSec = 300
+    )
+    $psi = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
+    foreach ($arg in $ArgumentList) { $psi.ArgumentList.Add($arg) }
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($TimeoutSec * 1000)) {
+        $process.Kill($true)
+        throw "Timed out after $TimeoutSec s: $FilePath $($ArgumentList -join ' ')"
+    }
+    $process.WaitForExit()
+    [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        StdOut   = $stdout.Result.Trim()
+        StdErr   = $stderr.Result.Trim()
+    }
+}
+
+$script:TransientVmrunErrors = @(
+    'VMware Tools are not running'
+    'The guest operations agent'
+    'The operation was canceled'
+)
+
+function Invoke-Vmrun {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Command,
+        [string[]]$Arguments = @(),
+        [switch]$Guest,
+        [switch]$NoVmx,
+        [int]$TimeoutSec = 300,
+        [int]$RetryCount = 5,
+        [int]$RetryDelaySec = 15
+    )
+    $argv = @('-T', 'ws')
+    if ($Guest) { $argv += @('-gu', $Config.GuestUser, '-gp', $Config.GuestPassword) }
+    $argv += $Command
+    if (-not $NoVmx) { $argv += $Config.VmxPath }
+    $argv += $Arguments
+
+    $display = $argv -join ' '
+    if ($Config.GuestPassword) { $display = $display.Replace($Config.GuestPassword, '***') }
+
+    for ($attempt = 1; ; $attempt++) {
+        Write-LabLog "vmrun $display" -Quiet
+        $result = Invoke-LabProcess -FilePath $Config.Vmrun -ArgumentList $argv -TimeoutSec $TimeoutSec
+        $text = (@($result.StdOut, $result.StdErr) | Where-Object { $_ }) -join "`n"
+        if ($text) { Write-LabLog "  -> $text" -Quiet }
+
+        if ($result.ExitCode -eq 0) {
+            return [pscustomobject]@{ Output = $result.StdOut; GuestExitCode = 0 }
+        }
+        if ($text -match 'Guest program exited with non-zero exit code: (-?\d+)') {
+            return [pscustomobject]@{ Output = $result.StdOut; GuestExitCode = [int]$Matches[1] }
+        }
+        $transient = $script:TransientVmrunErrors | Where-Object { $text -like "*$_*" }
+        if (-not $transient -or $attempt -gt $RetryCount) {
+            throw "vmrun $Command failed (exit $($result.ExitCode)): $text"
+        }
+        Start-Sleep -Seconds $RetryDelaySec
+    }
+}
