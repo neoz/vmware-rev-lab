@@ -67,6 +67,31 @@ Describe 'Restore-LabClean' {
     }
 }
 
+Describe 'New-LabGuestDirectory' {
+    BeforeAll { $cfg = @{ VmxPath = 'C:\vm\x.vmx'; GuestUser = 'u'; GuestPassword = 'p' } }
+
+    It 'creates the directory when vmrun reports it missing with a non-zero exit' {
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'directoryExistsInGuest' } {
+            throw 'vmrun directoryExistsInGuest failed (exit -1): The directory does not exist.'
+        }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'createDirectoryInGuest' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
+        New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\tmp'
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'createDirectoryInGuest' -and $Arguments[0] -eq 'C:\lab\tmp' }
+    }
+
+    It 'does nothing when the directory exists' {
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'directoryExistsInGuest' } { [pscustomobject]@{ Output = 'The directory exists.'; GuestExitCode = 0 } }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'createDirectoryInGuest' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
+        New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\tmp'
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'createDirectoryInGuest' }
+    }
+
+    It 'still surfaces other errors' {
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'directoryExistsInGuest' } { throw 'vmrun directoryExistsInGuest failed (exit -1): Invalid user name or password' }
+        { New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\tmp' } | Should -Throw -ExpectedMessage '*Invalid user name*'
+    }
+}
+
 Describe 'Invoke-LabGuestScript' {
     BeforeEach {
         $cfg = @{ VmxPath = 'C:\vm\x.vmx'; GuestUser = 'u'; GuestPassword = 'p' }

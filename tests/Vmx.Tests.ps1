@@ -27,6 +27,15 @@ Describe 'Get-LabVmxSettings' {
         foreach ($i in 1..3) { $s["sata0:$i.deviceType"] | Should -Be 'cdrom-image' }
     }
 
+    It 'declares PCIe root ports so the e1000e NIC gets a slot' {
+        $s['pciBridge0.present'] | Should -Be 'TRUE'
+        foreach ($i in 4..7) {
+            $s["pciBridge$i.present"] | Should -Be 'TRUE'
+            $s["pciBridge$i.virtualDev"] | Should -Be 'pcieRootPort'
+            $s["pciBridge$i.functions"] | Should -Be '8'
+        }
+    }
+
     It 'starts on NAT for setup' {
         $s['ethernet0.connectionType'] | Should -Be 'nat'
     }

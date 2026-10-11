@@ -3,11 +3,15 @@ $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'C:\lab' | Out-Null
 Start-Transcript -Path 'C:\lab\firstlogon.log' -Append
 
-$toolsDrive = Get-PSDrive -PSProvider FileSystem |
-    Where-Object { Test-Path (Join-Path $_.Root 'setup64.exe') } |
+# The Windows ISO also has setup.exe at its root, so find the Tools CD by its volume label.
+$toolsDrive = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=5' |
+    Where-Object { $_.VolumeName -like 'VMware Tools*' } |
     Select-Object -First 1
-if (-not $toolsDrive) { throw 'VMware Tools media (setup64.exe) not found on any drive' }
-Start-Process -FilePath (Join-Path $toolsDrive.Root 'setup64.exe') -ArgumentList '/S /v "/qn REBOOT=R"' -Wait
+if (-not $toolsDrive) { throw 'VMware Tools CD (volume label "VMware Tools") not found' }
+# Tools 13 ships a single setup.exe; older media had setup64.exe for 64-bit guests.
+$installer = Join-Path "$($toolsDrive.DeviceID)\" 'setup64.exe'
+if (-not (Test-Path $installer)) { $installer = Join-Path "$($toolsDrive.DeviceID)\" 'setup.exe' }
+Start-Process -FilePath $installer -ArgumentList '/S /v "/qn REBOOT=R"' -Wait
 
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0

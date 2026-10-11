@@ -213,6 +213,7 @@ function Get-LabVmxSettings {
         'numvcpus'                      = "$($Config.Cpu)"
         'cpuid.coresPerSocket'          = "$($Config.Cpu)"
         'memsize'                       = "$($Config.MemoryMB)"
+        'pciBridge0.present'            = 'TRUE'
         'sata0.present'                 = 'TRUE'
         'sata0:0.present'               = 'TRUE'
         'sata0:0.fileName'              = "$name.vmdk"
@@ -230,6 +231,12 @@ function Get-LabVmxSettings {
         'isolation.tools.paste.disable' = 'TRUE'
         'sharedFolder.maxNum'           = '0'
         'tools.syncTime'                = 'FALSE'
+    }
+    # PCIe devices such as the e1000e NIC need root ports, or the VM stops at "No PCIe slot available".
+    foreach ($i in 4..7) {
+        $settings["pciBridge$i.present"] = 'TRUE'
+        $settings["pciBridge$i.virtualDev"] = 'pcieRootPort'
+        $settings["pciBridge$i.functions"] = '8'
     }
     $media = @($WindowsIso, $AnswerIso, $Config.ToolsIso)
     for ($i = 1; $i -le 3; $i++) {
@@ -425,7 +432,13 @@ function Test-LabGuestFile {
 
 function New-LabGuestDirectory {
     param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath)
-    $exists = (Invoke-Vmrun -Config $Config -Command directoryExistsInGuest -Arguments @($GuestPath) -Guest).Output
+    # vmrun exits non-zero when the directory is missing.
+    try {
+        $exists = (Invoke-Vmrun -Config $Config -Command directoryExistsInGuest -Arguments @($GuestPath) -Guest).Output
+    } catch {
+        if ($_.Exception.Message -notmatch 'The directory does not exist') { throw }
+        $exists = ''
+    }
     if ($exists -notmatch 'The directory exists') {
         Invoke-Vmrun -Config $Config -Command createDirectoryInGuest -Arguments @($GuestPath) -Guest | Out-Null
     }
@@ -563,4 +576,38 @@ function Restore-LabClean {
     }
     Start-LabVm -Config $Config
     Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
+}
+
+function Test-LabIsoHash {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Expected)
+    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash
+    if ($actual -ne $Expected.ToUpperInvariant()) {
+        throw "SHA256 mismatch for ${Path}: got $actual, expected $Expected. If this ISO is intentional, set IsoSha256 in lab.config.psd1."
+    }
+}
+
+function Assert-LabVmAbsent {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    if (Test-Path $Config.VmxPath) {
+        throw "A VM already exists at $($Config.VmxPath). Delete it in VMware (Manage > Delete from Disk) or change VmxPath, then rerun with -From CreateVm."
+    }
+}
+
+function New-LabMcpJson {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    [ordered]@{
+        mcpServers = [ordered]@{
+            'vmware-mcp' = [ordered]@{
+                type    = 'stdio'
+                command = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\vmware-mcp.exe'
+                args    = @()
+                env     = [ordered]@{
+                    VMRUN_PATH      = $Config.Vmrun
+                    VMCLI_PATH      = $Config.Vmcli
+                    VMWARE_USERNAME = '${VMWARE_USERNAME:-}'
+                    VMWARE_PASSWORD = '${VMWARE_PASSWORD:-}'
+                }
+            }
+        }
+    } | ConvertTo-Json -Depth 5
 }
