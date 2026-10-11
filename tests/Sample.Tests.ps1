@@ -86,3 +86,26 @@ Describe 'Text fetch guards' {
         { Assert-LabNotPe $txt } | Should -Not -Throw
     }
 }
+
+Describe 'Start-LabSample' {
+    BeforeEach {
+        $runDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $runDir | Out-Null
+        $cfg = @{ Root = (Resolve-Path "$PSScriptRoot/..").Path }
+        Mock Copy-LabToGuest -ModuleName LabCommon {}
+        Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+    }
+
+    It 'writes a run file that launches under cdb -server when a debugger is given' {
+        Start-LabSample -Config $cfg -SamplePath 'C:\lab\in\sample\a b.exe' -RunDir $runDir -SampleArgs '-x' -Debugger 'C:\dbg\cdb.exe'
+        $run = Get-Content (Join-Path $runDir 'run.json') -Raw | ConvertFrom-Json
+        $run.Path | Should -Be 'C:\lab\in\sample\a b.exe'
+        $run.Debugger | Should -Be 'C:\dbg\cdb.exe'
+        $run.Pipe | Should -Be 'revlab-dbg'
+    }
+
+    It 'throws when the guest launch fails' {
+        Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 1; Output = 'not a valid Win32 application' } }
+        { Start-LabSample -Config $cfg -SamplePath 'C:\x.exe' -RunDir $runDir } | Should -Throw -ExpectedMessage '*did not start*Win32*'
+    }
+}

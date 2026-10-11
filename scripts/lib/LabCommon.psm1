@@ -882,3 +882,49 @@ function Open-LabCase {
     if ($r.ExitCode -ne 0) { throw "Opening case '$Case' failed: $($r.Output)" }
     ($r.Output -split "`r?`n")[-1].Trim()
 }
+
+$script:DebugPipe = 'revlab-dbg'
+$script:DebugConnect = "npipe:server=.,pipe=$script:DebugPipe"
+
+function Start-LabSample {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$SamplePath,
+        [Parameter(Mandatory)][string]$RunDir,
+        [string]$Export, [string]$SampleArgs, [string]$Debugger
+    )
+    $run = [ordered]@{ Path = $SamplePath; Export = $Export; Arguments = $SampleArgs; Debugger = $Debugger; Pipe = $script:DebugPipe }
+    $runFile = Join-Path $RunDir 'run.json'
+    # BOM so Windows PowerShell 5.1 reads non-ASCII sample names and arguments as UTF-8.
+    $run | ConvertTo-Json | Set-Content -Path $runFile -Encoding utf8BOM
+    Copy-LabToGuest -Config $Config -HostPath $runFile -GuestPath 'C:\lab\in\run.json'
+    $launch = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/run-sample.ps1') -Arguments @{ RunFile = 'C:\lab\in\run.json' } -Interactive
+    if ($launch.ExitCode -ne 0) { throw "Sample did not start: $($launch.Output)" }
+}
+
+function Invoke-LabCollect {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$RunDir, [Parameter(Mandatory)][string]$Start)
+    try {
+        Invoke-Vmrun -Config $Config -Command captureScreen -Arguments @((Join-Path $RunDir 'screenshot.png')) -Guest | Out-Null
+    } catch {
+        Write-LabLog "Screenshot failed (continuing): $($_.Exception.Message)"
+    }
+    $collect = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/collect.ps1') -Arguments @{ Start = $Start } -Interactive -TimeoutSec 1200
+    Write-LabLog $collect.Output -Quiet
+    if ($collect.ExitCode -ne 0) { throw "collect.ps1 failed: $($collect.Output)" }
+    Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\artefacts.zip' -HostPath (Join-Path $RunDir 'artefacts.zip')
+    $textZip = Join-Path $RunDir 'text.zip'
+    Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\text.zip' -HostPath $textZip
+    Expand-Archive -Path $textZip -DestinationPath (Join-Path $RunDir 'text')
+    Remove-Item -Path $textZip
+    Write-LabLog "Artefacts: $RunDir"
+}
+
+function Get-LabGuestTools {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $local = Join-Path ([System.IO.Path]::GetTempPath()) "tools-$([guid]::NewGuid().ToString('N')).json"
+    try {
+        Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\tools.json' -HostPath $local
+        Get-Content $local -Raw | ConvertFrom-Json
+    } finally { Remove-Item $local -ErrorAction SilentlyContinue }
+}

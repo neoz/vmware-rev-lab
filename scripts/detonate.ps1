@@ -8,6 +8,8 @@
     Command-line arguments for the sample.
 .PARAMETER Export
     DLL export to call through rundll32.
+.PARAMETER UnderDebugger
+    Run the sample under cdb -server and return immediately; finish with .\scripts\collect.ps1 -Case <case>.
 .PARAMETER KeepRunning
     Leave the VM running after collection (for manual debugging); run .\scripts\reset.ps1 afterwards.
 #>
@@ -17,7 +19,8 @@ param(
     [string]$Sample,
     [string]$SampleArgs,
     [string]$Export,
-    [switch]$KeepRunning
+    [switch]$KeepRunning,
+    [switch]$UnderDebugger
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
@@ -35,7 +38,7 @@ $guest = Join-Path $config.Root 'templates/guest'
 
 $sampleStarted = $false
 $collected = $false
-Restore-LabClean -Config $config
+Restore-LabClean -Config $config -SaveCase
 try {
     Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\in\sample.zip'
     $prep = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'prepare-sample.ps1') -Arguments @{ Zip = 'C:\lab\in\sample.zip'; Name = $entry }
@@ -46,32 +49,20 @@ try {
     if ($monitors.ExitCode -ne 0) { throw "start-monitors.ps1 failed: $($monitors.Output)" }
     $start = ($monitors.Output -split "`r?`n")[-1].Trim()
 
-    $runFile = Join-Path $runDir 'run.json'
-    # BOM so Windows PowerShell 5.1 reads non-ASCII sample names and arguments as UTF-8.
-    @{ Path = $samplePath; Export = $Export; Arguments = $SampleArgs } | ConvertTo-Json | Set-Content -Path $runFile -Encoding utf8BOM
-    Copy-LabToGuest -Config $config -HostPath $runFile -GuestPath 'C:\lab\in\run.json'
-    # run-sample.ps1 returns right after Start-Process, so wait for it and fail if the sample did not start.
-    $launch = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'run-sample.ps1') -Arguments @{ RunFile = 'C:\lab\in\run.json' } -Interactive
-    if ($launch.ExitCode -ne 0) { throw "Sample did not start: $($launch.Output)" }
+    $debugger = if ($UnderDebugger) { (Get-LabGuestTools -Config $config).Cdb } else { '' }
+    Start-LabSample -Config $config -SamplePath $samplePath -RunDir $runDir -Export $Export -SampleArgs $SampleArgs -Debugger $debugger
     $sampleStarted = $true
+    if ($UnderDebugger) {
+        Set-Content -Path (Join-Path $runDir 'monitor-start.txt') -Value $start
+        Set-Content -Path (Join-Path $caseDir 'runs/pending.txt') -Value $runDir
+        Write-LabLog "Sample is stopped under cdb. Attach with revlab-windbg open_cdb_remote 'npipe:server=.,pipe=revlab-dbg'."
+        Write-LabLog "When done: .\scripts\collect.ps1 -Case $Case"
+        $KeepRunning = $true
+        return
+    }
     Write-LabLog "Running $entry for $Timeout s"
     Start-Sleep -Seconds $Timeout
-
-    try {
-        Invoke-Vmrun -Config $config -Command captureScreen -Arguments @((Join-Path $runDir 'screenshot.png')) -Guest | Out-Null
-    } catch {
-        Write-LabLog "Screenshot failed (continuing): $($_.Exception.Message)"
-    }
-    $collect = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'collect.ps1') -Arguments @{ Start = $start } -Interactive -TimeoutSec 1200
-    Write-LabLog $collect.Output -Quiet
-    if ($collect.ExitCode -ne 0) { throw "collect.ps1 failed: $($collect.Output)" }
-
-    Copy-LabFromGuest -Config $config -GuestPath 'C:\lab\artefacts.zip' -HostPath (Join-Path $runDir 'artefacts.zip')
-    $textZip = Join-Path $runDir 'text.zip'
-    Copy-LabFromGuest -Config $config -GuestPath 'C:\lab\text.zip' -HostPath $textZip
-    Expand-Archive -Path $textZip -DestinationPath (Join-Path $runDir 'text')
-    Remove-Item -Path $textZip
-    Write-LabLog "Artefacts: $runDir"
+    Invoke-LabCollect -Config $config -RunDir $runDir -Start $start
     $collected = $true
 } finally {
     if ($KeepRunning) {

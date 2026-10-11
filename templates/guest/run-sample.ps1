@@ -22,8 +22,14 @@ switch ($extension) {
     { $_ -in '.bat', '.cmd' } { $file = 'cmd.exe'; $argList = "/c `"`"$path`" $($run.Arguments)`"" }
     default { throw "Unsupported sample type '$extension'" }
 }
-$params = @{ FilePath = $file; WorkingDirectory = $dir; PassThru = $true }
-if ("$argList".Trim()) { $params.ArgumentList = "$argList".Trim() }
-$process = Start-Process @params
+if ($run.Debugger) {
+    # Start under a cdb debug server; mcp-windbg attaches with open_cdb_remote.
+    $debugArgs = "-server npipe:pipe=$($run.Pipe) -o `"$file`" $argList".Trim()
+    $process = Start-Process -FilePath $run.Debugger -ArgumentList $debugArgs -WorkingDirectory $dir -PassThru
+} else {
+    $params = @{ FilePath = $file; WorkingDirectory = $dir; PassThru = $true }
+    if ("$argList".Trim()) { $params.ArgumentList = "$argList".Trim() }
+    $process = Start-Process @params
+}
 Set-Content -Path 'C:\lab\out\sample.pid' -Value $process.Id
 exit 0
