@@ -47,6 +47,20 @@ def ask(conn, text):
 
 
 class RelayTests(unittest.TestCase):
+    def test_child_stderr_goes_to_the_child_log(self):
+        # Under pythonw the relay has no stderr; the child must get a real one or it dies on its first log line.
+        import tempfile
+        log = Path(tempfile.mkdtemp()) / "child.log"
+        listener = TcpListener()
+        threading.Thread(target=relay.run, args=(listener, CHILD, None, str(log)), daemon=True).start()
+        with connect(listener.port) as c:
+            ask(c, "hi")
+        for _ in range(50):
+            if log.exists() and "child banner on stderr" in log.read_text():
+                break
+            threading.Event().wait(0.1)
+        self.assertIn("child banner on stderr", log.read_text())
+
     def test_round_trip(self):
         port = start_relay()
         with connect(port) as c:

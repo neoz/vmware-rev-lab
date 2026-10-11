@@ -205,7 +205,47 @@ function Invoke-SnapshotPhase {
     $cfg = $script:config
     Restart-LabGuest -Config $cfg
     Wait-LabDesktop -Config $cfg
+    Wait-LabCondition -Description 'MCP relays running' -TimeoutSec 300 -PollSec 10 -Condition { Test-LabRelaysRunning -Config $cfg }
     Update-LabSnapshot -Config $cfg
+}
+
+function Invoke-McpBridgePhase {
+    $cfg = $script:config
+    Stop-LabVm -Config $cfg
+    $vmx = Read-LabVmx $cfg
+    $vmx['vmci0.present'] = 'TRUE'
+    Write-LabVmx -Config $cfg -Settings $vmx
+    Set-LabVmxNetwork -Config $cfg -Mode Setup
+    Start-LabVm -Config $cfg
+    Wait-LabTools -Config $cfg -TimeoutSec 900
+    Wait-LabDesktop -Config $cfg
+    Set-LabGuestNetwork -Config $cfg -Mode Setup
+
+    New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\mcp'
+    Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'scripts\mcp\vsock.py') -GuestPath 'C:\lab\mcp\vsock.py'
+    Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates\guest\mcp\relay.py') -GuestPath 'C:\lab\mcp\relay.py'
+    $r = Invoke-LabGuestScript -Config $cfg -Path (Join-Path $cfg.Root 'templates/guest/mcp-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
+        ReMcpGhidraVersion = $cfg.ReMcpGhidraVersion; McpWindbgVersion = $cfg.McpWindbgVersion
+        GhidraPort = "$($cfg.McpGhidraPort)"; WindbgPort = "$($cfg.McpWindbgPort)"; User = $cfg.GuestUser
+    }
+    Write-LabLog $r.Output
+    if ($r.ExitCode -ne 0) { throw 'mcp-install.ps1 failed' }
+
+    Stop-LabVm -Config $cfg
+    Set-LabVmxNetwork -Config $cfg -Mode Analysis
+    Start-LabVm -Config $cfg
+    Wait-LabTools -Config $cfg -TimeoutSec 900
+    Wait-LabDesktop -Config $cfg
+    Set-LabGuestNetwork -Config $cfg -Mode Analysis
+    Assert-LabIsolation -Config $cfg
+
+    Set-Content -Path (Join-Path $cfg.Root '.mcp.json') -Value (New-LabMcpJson -Config $cfg) -Encoding utf8
+    Wait-LabCondition -Description 'MCP relays running' -TimeoutSec 300 -PollSec 10 -Condition { Test-LabRelaysRunning -Config $cfg }
+    foreach ($server in 'revlab-ghidra', 'revlab-windbg') {
+        $count = Test-LabMcpBridge -Config $cfg -Server $server
+        if ($count -lt 1) { throw "$server lists no tools" }
+        Write-LabLog "${server}: $count tools"
+    }
 }
 
 $phases = [ordered]@{
@@ -218,6 +258,7 @@ $phases = [ordered]@{
     GuestPrep      = { Invoke-GuestPrepPhase }
     FlareVm        = { Invoke-FlareVmPhase }
     AnalysisConfig = { Invoke-AnalysisConfigPhase }
+    McpBridge      = { Invoke-McpBridgePhase }
     Snapshot       = { Invoke-SnapshotPhase }
 }
 

@@ -26,8 +26,10 @@ def _socket_to_child(conn, child):
             pass
 
 
-def serve_connection(conn, command, env):
-    child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
+def serve_connection(conn, command, env, child_log=None):
+    # Under pythonw the relay has no stderr; MCP servers log to stderr and die without a usable one.
+    err = open(child_log, "ab") if child_log else subprocess.DEVNULL
+    child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=env)
     threading.Thread(target=_socket_to_child, args=(conn, child), daemon=True).start()
     try:
         while True:
@@ -50,9 +52,11 @@ def serve_connection(conn, command, env):
             child.kill()
             child.wait()
         child.stdout.close()  # the relay runs for days; do not leak a handle per connection
+        if child_log:
+            err.close()
 
 
-def run(listener, command, env):
+def run(listener, command, env, child_log=None):
     busy = threading.Lock()
     while True:
         conn = listener.accept()
@@ -63,7 +67,7 @@ def run(listener, command, env):
 
         def work(c=conn):
             try:
-                serve_connection(c, command, env)
+                serve_connection(c, command, env, child_log)
             except Exception:
                 logging.exception("connection failed")
             finally:
@@ -77,6 +81,7 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--env", action="append", default=[], help="KEY=VALUE for the child")
     parser.add_argument("--log")
+    parser.add_argument("--child-log", help="stderr of the MCP server child")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -91,7 +96,7 @@ def main():
     try:
         listener = vsock.Listener(args.port)
         logging.info("listening on vsock port %s for %s", args.port, command)
-        run(listener, command, env)
+        run(listener, command, env, args.child_log)
     except Exception:
         logging.exception("relay stopped")
         raise

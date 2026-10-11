@@ -163,3 +163,18 @@ Describe 'Assert-LabIsolation' {
         Should -Invoke Invoke-LabGuestScript -ModuleName LabCommon -Times 0 -Exactly
     }
 }
+
+Describe 'Test-LabRelaysRunning' {
+    BeforeAll { $cfg = @{ VmxPath = 'C:\vm\x.vmx'; GuestUser = 'u'; GuestPassword = 'p' } }
+
+    It 'needs both relay processes' {
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ GuestExitCode = 0; Output = "pid=1, owner=REVLAB\analyst, cmd=pythonw.exe`npid=2, owner=x, cmd=explorer.exe" }
+        }
+        Test-LabRelaysRunning -Config $cfg | Should -BeFalse
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ GuestExitCode = 0; Output = "pid=1, owner=REVLAB\analyst, cmd=pythonw.exe`npid=3, owner=REVLAB\analyst, cmd=pythonw.exe" }
+        }
+        Test-LabRelaysRunning -Config $cfg | Should -BeTrue
+    }
+}

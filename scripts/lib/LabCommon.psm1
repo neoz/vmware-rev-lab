@@ -799,3 +799,22 @@ function Update-LabToolsIndex {
     Write-LabLog $r.Output
     if ($r.ExitCode -ne 0) { throw "index-tools.ps1 failed: $($r.Output)" }
 }
+
+function Test-LabRelaysRunning {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    try {
+        $out = (Invoke-Vmrun -Config $Config -Command listProcessesInGuest -Guest -RetryCount 0).Output
+    } catch { return $false }
+    # listProcessesInGuest shows image names only; the two relays are the only pythonw.exe in the clean guest.
+    @($out -split "`r?`n" | Where-Object { $_ -match 'cmd=pythonw\.exe' }).Count -ge 2
+}
+
+function Test-LabMcpBridge {
+    # Starts the bridge as Claude Code would (from .mcp.json) and returns the server's tool count.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Server)
+    $python = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\python.exe'
+    $r = Invoke-LabProcess -FilePath $python -ArgumentList @('-I', (Join-Path $Config.Root 'tests\mcp_client.py'),
+        (Join-Path $Config.Root '.mcp.json'), $Server, 'count') -TimeoutSec 300
+    if ($r.ExitCode -ne 0 -or $r.StdOut -notmatch 'tools=(\d+)') { throw "MCP bridge '$Server' failed: $($r.StdOut) $($r.StdErr)" }
+    [int]$Matches[1]
+}
