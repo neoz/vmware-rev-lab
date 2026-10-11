@@ -37,6 +37,7 @@ New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 $guest = Join-Path $config.Root 'templates/guest'
 
 $sampleStarted = $false
+$debugRun = $false
 $collected = $false
 Restore-LabClean -Config $config -SaveCase
 try {
@@ -57,7 +58,7 @@ try {
         Set-Content -Path (Join-Path $caseDir 'runs/pending.txt') -Value $runDir
         Write-LabLog "Sample is stopped under cdb. Attach with revlab-windbg open_cdb_remote 'npipe:server=.,pipe=revlab-dbg'."
         Write-LabLog "When done: .\scripts\collect.ps1 -Case $Case"
-        $KeepRunning = $true
+        $debugRun = $true
         return
     }
     Write-LabLog "Running $entry for $Timeout s"
@@ -65,7 +66,10 @@ try {
     Invoke-LabCollect -Config $config -RunDir $runDir -Start $start
     $collected = $true
 } finally {
-    if ($KeepRunning) {
+    if ($debugRun) {
+        # reset.ps1 would discard this run's monitor data; collect.ps1 gathers it first.
+        Write-LabLog "Debug run left running. When done: .\scripts\collect.ps1 -Case $Case (collects, then reverts)."
+    } elseif ($KeepRunning) {
         Write-LabLog 'VM left running (-KeepRunning). Run .\scripts\reset.ps1 when done.'
     } elseif ($sampleStarted -and -not $collected) {
         # Reverting now would destroy the guest-side Procmon/FakeNet/Sysmon data of this run.

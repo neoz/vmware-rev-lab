@@ -46,6 +46,14 @@ def ask(conn, text):
     return data.decode()
 
 
+def assert_closed(test, conn):
+    # A prompt close is EOF or, with unread data on Windows, a reset; a timeout means the relay left it hanging.
+    try:
+        test.assertEqual(conn.recv(10), b"")
+    except (ConnectionAbortedError, ConnectionResetError):
+        pass
+
+
 class RelayTests(unittest.TestCase):
     def test_child_stderr_goes_to_the_child_log(self):
         # Under pythonw the relay has no stderr; the child must get a real one or it dies on its first log line.
@@ -88,6 +96,41 @@ class RelayTests(unittest.TestCase):
             except OSError:
                 pass
         self.assertNotEqual(reply.split(" ")[0], pid1)
+
+    def test_child_ignoring_eof_is_killed_after_grace(self):
+        # A server that stays up after the host hangs up must not hold the port's only session forever.
+        stubborn = [sys.executable, str(Path(__file__).resolve().parent / "fixtures" / "stubborn_child.py")]
+        listener = TcpListener()
+        old_grace, relay.GRACE_SECONDS = relay.GRACE_SECONDS, 0.5
+        self.addCleanup(setattr, relay, "GRACE_SECONDS", old_grace)
+        threading.Thread(target=relay.run, args=(listener, stubborn, None), daemon=True).start()
+        with connect(listener.port) as c:
+            ask(c, "one")
+        reply = ""
+        for _ in range(50):
+            try:
+                with connect(listener.port) as c:
+                    reply = ask(c, "two")
+            except OSError:
+                pass
+            if reply:
+                break
+            threading.Event().wait(0.2)
+        self.assertTrue(reply.endswith("two\n"))
+
+    def test_spawn_failure_closes_connection(self):
+        listener = TcpListener()
+        threading.Thread(target=relay.run, args=(listener, ["no-such-mcp-server.exe"], None), daemon=True).start()
+        with connect(listener.port) as c:
+            c.sendall(b"hi\n")
+            assert_closed(self, c)
+
+    def test_child_log_failure_closes_connection(self):
+        listener = TcpListener()
+        threading.Thread(target=relay.run, args=(listener, CHILD, None, "Z:/no/such/dir/child.log"), daemon=True).start()
+        with connect(listener.port) as c:
+            c.sendall(b"hi\n")
+            assert_closed(self, c)
 
     def test_child_exit_closes_connection(self):
         port = start_relay()

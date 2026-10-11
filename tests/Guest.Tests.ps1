@@ -58,7 +58,7 @@ Describe 'Snapshots' {
 Describe 'Restore-LabClean' {
     BeforeEach {
         $vmx = Join-Path $TestDrive 'x.vmx'
-        $cfg = @{ VmxPath = $vmx; SnapshotName = 'clean'; AnalysisPvnId = '52 01' }
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))); VmxPath = $vmx; SnapshotName = 'clean'; AnalysisPvnId = '52 01' }
         Mock Start-Sleep -ModuleName LabCommon {}
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'revertToSnapshot' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'list' } { [pscustomobject]@{ Output = 'Total running VMs: 0'; GuestExitCode = 0 } }

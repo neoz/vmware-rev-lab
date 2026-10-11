@@ -6,7 +6,7 @@ Describe 'Save-LabCase' {
     BeforeEach {
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root | Out-Null
-        $cfg = @{ Root = $root; VmxPath = 'C:\vm\x.vmx'; GuestUser = 'u'; GuestPassword = 'p' }
+        $cfg = @{ Root = $root; LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))); VmxPath = 'C:\vm\x.vmx'; GuestUser = 'u'; GuestPassword = 'p' }
     }
 
     It 'returns false when no case is open' {
@@ -36,7 +36,7 @@ Describe 'Restore-LabClean -SaveCase' {
     BeforeEach {
         $vmx = Join-Path $TestDrive 'x.vmx'
         Set-Content $vmx @('ethernet0.connectionType = "pvn"', 'ethernet0.pvnID = "52 01"')
-        $cfg = @{ VmxPath = $vmx; SnapshotName = 'clean'; AnalysisPvnId = '52 01' }
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))); VmxPath = $vmx; SnapshotName = 'clean'; AnalysisPvnId = '52 01' }
         Mock Start-Sleep -ModuleName LabCommon {}
         Mock Test-LabVmRunning -ModuleName LabCommon { $true }
         Mock Invoke-Vmrun -ModuleName LabCommon { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
@@ -68,7 +68,7 @@ Describe 'Open-LabCase' {
         New-Item -ItemType Directory -Force (Join-Path $root 'cases/c1/static') | Out-Null
         Set-Content (Join-Path $root 'cases/c1/static/ghidra.zip') 'z'
         Set-Content (Join-Path $root 'cases/c1/sample.zip') 's'
-        $cfg = @{ Root = $root; VmxPath = 'C:\vm\x.vmx' }
+        $cfg = @{ Root = $root; LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))); VmxPath = 'C:\vm\x.vmx' }
         Mock Copy-LabToGuest -ModuleName LabCommon {}
         Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 0; Output = 'C:\lab\in\sample\a.exe' } }
         Open-LabCase -Config $cfg -Case 'c1' -Name 'a.exe' | Should -Be 'C:\lab\in\sample\a.exe'

@@ -586,8 +586,15 @@ function Update-LabSnapshot {
 function Restore-LabClean {
     param([Parameter(Mandatory)][hashtable]$Config, [switch]$SaveCase)
     # Saving first means a failed save stops here, before any work in the guest is lost.
-    if ($SaveCase -and (Test-LabVmRunning -Config $Config)) { Save-LabCase -Config $Config | Out-Null }
+    if ($SaveCase -and (Test-LabVmRunning -Config $Config)) {
+        try {
+            Save-LabCase -Config $Config | Out-Null
+        } catch {
+            throw "Saving the open case failed, so the VM was not reverted: $($_.Exception.Message). Fix the guest and retry, or run .\scripts\reset.ps1 -NoSave to discard the guest state."
+        }
+    }
     Invoke-Vmrun -Config $Config -Command revertToSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 600 | Out-Null
+    Clear-LabRunState -Config $Config
     $mode = Get-LabVmxNetworkMode -Config $Config
     if ($mode -ne 'Analysis') {
         throw "VM network is '$mode', not on the analysis LAN segment. Refusing to resume. Run .\scripts\net.ps1 -Mode Analysis first."
@@ -822,23 +829,36 @@ function Test-LabMcpBridge {
 }
 
 function Test-LabGuestDirectory {
-    # vmrun exits non-zero when the directory is missing (see New-LabGuestDirectory).
+    # vmrun exits non-zero when the directory is missing; any other failure (Tools down, ...) is not "missing".
     param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$GuestPath)
     try {
         (Invoke-Vmrun -Config $Config -Command directoryExistsInGuest -Arguments @($GuestPath) -Guest -RetryCount 0).Output -match 'The directory exists'
-    } catch { $false }
+    } catch {
+        if ($_.Exception.Message -match 'The directory does not exist') { return $false }
+        throw
+    }
 }
 
 function Get-LabCurrentCase {
+    # Kept on the host: a sample in the guest must not be able to choose which case gets overwritten.
     param([Parameter(Mandatory)][hashtable]$Config)
-    if (-not (Test-LabGuestFile -Config $Config -GuestPath 'C:\lab\current-case.txt')) { return $null }
-    $local = Join-Path ([System.IO.Path]::GetTempPath()) "current-case-$([guid]::NewGuid().ToString('N')).txt"
-    try {
-        Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\current-case.txt' -HostPath $local
-        $case = (Get-Content -Path $local -Raw).Trim()
-    } finally { Remove-Item $local -ErrorAction SilentlyContinue }
+    $path = Join-Path $Config.LabDir 'current-case.txt'
+    if (-not (Test-Path $path)) { return $null }
+    $case = (Get-Content -Path $path -Raw).Trim()
     Assert-LabCaseName $case
     $case
+}
+
+function Set-LabCurrentCase {
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    Assert-LabCaseName $Case
+    New-Item -ItemType Directory -Force -Path $Config.LabDir | Out-Null
+    Set-Content -Path (Join-Path $Config.LabDir 'current-case.txt') -Value $Case -Encoding ascii
+}
+
+function Clear-LabRunState {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    Remove-Item -Path (Join-Path $Config.LabDir 'current-case.txt'), (Join-Path $Config.LabDir 'sample-ran.txt') -ErrorAction SilentlyContinue
 }
 
 function Save-LabCase {
@@ -859,14 +879,27 @@ function Save-LabCase {
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     $tmp = Join-Path $dest 'ghidra.zip.part'
     Copy-LabFromGuest -Config $Config -GuestPath 'C:\lab\tmp\case.zip' -HostPath $tmp
-    Move-Item -Path $tmp -Destination (Join-Path $dest 'ghidra.zip') -Force
-    Write-LabLog "Saved case '$Case' to $(Join-Path $dest 'ghidra.zip')"
+    $main = Join-Path $dest 'ghidra.zip'
+    if (Test-Path (Join-Path $Config.LabDir 'sample-ran.txt')) {
+        # A sample ran next to the databases: it may have encrypted, deleted or replaced them. Keep the
+        # analyst's ghidra.zip and store the post-run state separately as evidence.
+        $target = Join-Path $dest ('ghidra-postrun-{0:yyyyMMdd-HHmmss}.zip' -f (Get-Date))
+    } else {
+        if (Test-Path $main) { Copy-Item -Path $main -Destination (Join-Path $dest 'ghidra.prev.zip') -Force }
+        $target = $main
+    }
+    Move-Item -Path $tmp -Destination $target -Force
+    Write-LabLog "Saved case '$Case' to $target"
     $true
 }
 
 function Open-LabCase {
     param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case, [string]$Name)
     Assert-LabCaseName $Case
+    $open = Get-LabCurrentCase -Config $Config
+    if ($open -and $open -ne $Case) {
+        throw "Case '$open' is open in the guest; run .\scripts\reset.ps1 (saves it) before opening '$Case'."
+    }
     $caseDir = Join-Path $Config.Root "cases/$Case"
     $saved = Join-Path $caseDir 'static/ghidra.zip'
     if (Test-Path $saved) {
@@ -880,6 +913,7 @@ function Open-LabCase {
         Zip = 'C:\lab\in\case.zip'; Destination = $destination; Case = $Case; Name = "$Name"
     }
     if ($r.ExitCode -ne 0) { throw "Opening case '$Case' failed: $($r.Output)" }
+    Set-LabCurrentCase -Config $Config -Case $Case
     ($r.Output -split "`r?`n")[-1].Trim()
 }
 
@@ -898,6 +932,8 @@ function Start-LabSample {
     # BOM so Windows PowerShell 5.1 reads non-ASCII sample names and arguments as UTF-8.
     $run | ConvertTo-Json | Set-Content -Path $runFile -Encoding utf8BOM
     Copy-LabToGuest -Config $Config -HostPath $runFile -GuestPath 'C:\lab\in\run.json'
+    New-Item -ItemType Directory -Force -Path $Config.LabDir | Out-Null
+    Set-Content -Path (Join-Path $Config.LabDir 'sample-ran.txt') -Value (Get-Date -Format o)
     $launch = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/run-sample.ps1') -Arguments @{ RunFile = 'C:\lab\in\run.json' } -Interactive
     if ($launch.ExitCode -ne 0) { throw "Sample did not start: $($launch.Output)" }
 }

@@ -91,7 +91,7 @@ Describe 'Start-LabSample' {
     BeforeEach {
         $runDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $runDir | Out-Null
-        $cfg = @{ Root = (Resolve-Path "$PSScriptRoot/..").Path }
+        $cfg = @{ Root = (Resolve-Path "$PSScriptRoot/..").Path; LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
         Mock Copy-LabToGuest -ModuleName LabCommon {}
         Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 0; Output = '' } }
     }
