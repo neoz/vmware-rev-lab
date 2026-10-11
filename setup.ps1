@@ -124,6 +124,26 @@ function Invoke-WindowsInstallPhase {
     Write-LabLog 'Windows installed, Tools running'
 }
 
+function Invoke-GuestPrepPhase {
+    $cfg = $script:config
+    $prep = Join-Path $cfg.Root 'templates/guest/guest-prep.ps1'
+    $r = Invoke-LabGuestScript -Config $cfg -Path $prep
+    if ($r.ExitCode -eq 3) {
+        Write-LabLog "Defender still active ($($r.Output)); restarting the guest once so the policies apply"
+        Restart-LabGuest -Config $cfg
+        $r = Invoke-LabGuestScript -Config $cfg -Path $prep
+    }
+    Write-LabLog $r.Output
+    if ($r.ExitCode -eq 3) {
+        throw @'
+Defender or Tamper Protection is still enabled in the guest.
+In the VM console open Windows Security > Virus & threat protection > Manage settings,
+turn off Tamper Protection, then run: .\setup.ps1 -From GuestPrep
+'@
+    }
+    if ($r.ExitCode -ne 0) { throw "guest-prep.ps1 failed (exit $($r.ExitCode)): $($r.Output)" }
+}
+
 $phases = [ordered]@{
     Preflight      = { Invoke-PreflightPhase }
     Mcp            = { Invoke-McpPhase }
@@ -131,6 +151,7 @@ $phases = [ordered]@{
     AnswerIso      = { Invoke-AnswerIsoPhase }
     CreateVm       = { Invoke-CreateVmPhase }
     WindowsInstall = { Invoke-WindowsInstallPhase }
+    GuestPrep      = { Invoke-GuestPrepPhase }
 }
 
 Invoke-LabPhases -Phases $phases -StatePath $script:config.StatePath -From $From
