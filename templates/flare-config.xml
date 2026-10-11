@@ -27,7 +27,6 @@
         <package name="de4dot-cex.vm"/>
         <package name="didier-stevens-suite.vm"/>
         <package name="die.vm"/>
-        <package name="dotnet3.5"/>
         <package name="fakenet-ng.vm"/>
         <package name="floss.vm"/>
         <package name="ghidra.vm"/>

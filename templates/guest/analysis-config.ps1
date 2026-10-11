@@ -4,6 +4,16 @@ param([string]$SysmonConfig, [string]$FridaToolsVersion, [string]$DotnetSdkVersi
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'C:\lab\in', 'C:\lab\out', 'C:\lab\setup' | Out-Null
 
+# .NET 3.5 (for old .NET samples) comes from the Windows ISO, still attached at this point;
+# the choco package needs Windows Update, which is disabled.
+if ((Get-WindowsOptionalFeature -Online -FeatureName NetFx3).State -ne 'Enabled') {
+    $sxs = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root 'sources\sxs' } |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $sxs) { throw 'Windows ISO (sources\sxs) not found for NetFx3' }
+    & dism.exe /Online /Enable-Feature /FeatureName:NetFx3 /All /LimitAccess /Source:$sxs /NoRestart | Out-Null
+    if ($LASTEXITCODE -notin 0, 3010) { throw "DISM NetFx3 failed (exit $LASTEXITCODE)" }
+}
+
 & py -3.13 -m pip install --disable-pip-version-check --quiet "frida-tools==$FridaToolsVersion"
 if ($LASTEXITCODE -ne 0) { throw "pip install frida-tools failed (exit $LASTEXITCODE)" }
 $pythonDir = & py -3.13 -c "import os, sys; print(os.path.dirname(sys.executable))"

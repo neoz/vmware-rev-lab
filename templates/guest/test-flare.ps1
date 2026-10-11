@@ -9,7 +9,8 @@ Get-ChildItem -Path 'C:\ProgramData\_VM' -Filter '*fail*' -ErrorAction SilentlyC
     Write-Output "--- $($_.Name)"
     Get-Content -Path $_.FullName
 }
-if ($installed -and -not $pending -and -not $boxstarter) { exit 0 }
+# Boxstarter keeps its console open ('Type ENTER to exit') after installer.vm finishes, so it is not a completion signal.
+if ($installed -and -not $pending) { exit 0 }
 # Boxstarter is installed by FLARE's install.ps1 before installer.vm, so its presence means the install has started.
 if ((Test-Path $lib) -or $boxstarter -or (Test-Path 'C:\ProgramData\chocolatey\lib\Boxstarter')) { exit 1 }
 exit 2
