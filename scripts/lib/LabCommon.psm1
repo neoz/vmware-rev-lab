@@ -636,3 +636,35 @@ function Assert-LabIsolation {
     Write-LabLog $r.Output
     if ($r.ExitCode -ne 0) { throw "Isolation check failed: $($r.Output)" }
 }
+
+$script:SupportedSampleExtensions = @('.exe', '.dll', '.ps1', '.bat', '.cmd')
+
+function Get-LabSampleEntry {
+    # Reads only the zip directory (works for password-protected zips); never extracts.
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [string]$Sample,
+        [string]$Export
+    )
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $ZipPath).Path)
+    try {
+        $names = @($archive.Entries | Where-Object { $_.Name } | ForEach-Object Name)
+    } finally {
+        $archive.Dispose()
+    }
+    if ($Sample) {
+        if ($Sample -notin $names) { throw "'$Sample' is not in $ZipPath. Files: $($names -join ', ')" }
+        $entry = $Sample
+    } elseif ($names.Count -eq 1) {
+        $entry = $names[0]
+    } else {
+        throw "$ZipPath has $($names.Count) files; pass -Sample <name>. Files: $($names -join ', ')"
+    }
+    $extension = [System.IO.Path]::GetExtension($entry).ToLowerInvariant()
+    if ($extension -notin $script:SupportedSampleExtensions) {
+        throw "Unsupported sample type '$extension' for '$entry'. Supported: $($script:SupportedSampleExtensions -join ', '). Repack the zip and rename the file with the right extension."
+    }
+    if ($extension -eq '.dll' -and -not $Export) { throw "'$entry' is a DLL; pass -Export <function> to run it with rundll32" }
+    $entry
+}
