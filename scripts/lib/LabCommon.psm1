@@ -90,7 +90,8 @@ function Invoke-LabProcess {
     $stderr = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit($TimeoutSec * 1000)) {
         $process.Kill($true)
-        throw "Timed out after $TimeoutSec s: $FilePath $($ArgumentList -join ' ')"
+        # Arguments may carry the guest password; callers add a masked command line.
+        throw "Timed out after $TimeoutSec s: $FilePath"
     }
     $process.WaitForExit()
     [pscustomobject]@{
@@ -129,7 +130,11 @@ function Invoke-Vmrun {
 
     for ($attempt = 1; ; $attempt++) {
         Write-LabLog "vmrun $display" -Quiet
-        $result = Invoke-LabProcess -FilePath $Config.Vmrun -ArgumentList $argv -TimeoutSec $TimeoutSec
+        try {
+            $result = Invoke-LabProcess -FilePath $Config.Vmrun -ArgumentList $argv -TimeoutSec $TimeoutSec
+        } catch {
+            throw "vmrun $display failed: $($_.Exception.Message)"
+        }
         $text = (@($result.StdOut, $result.StdErr) | Where-Object { $_ }) -join "`n"
         if ($text) { Write-LabLog "  -> $text" -Quiet }
 
@@ -466,7 +471,8 @@ function Copy-LabGuestScript {
         Output  = "$script:GuestTmp\$name-$id.out"
     }
     $argText = ($Arguments.Keys | ForEach-Object {
-        "-$_ '$(([string]$Arguments[$_]) -replace "'", "''")'"
+        # PowerShell treats U+2018..U+201B like ' inside single-quoted strings, so double those too.
+        "-$_ '$(([string]$Arguments[$_]) -replace "['\u2018\u2019\u201A\u201B]", '$0$0')'"
     }) -join ' '
     $wrapper = @"
 `$code = 0

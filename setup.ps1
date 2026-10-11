@@ -144,32 +144,44 @@ turn off Tamper Protection, then run: .\setup.ps1 -From GuestPrep
     if ($r.ExitCode -ne 0) { throw "guest-prep.ps1 failed (exit $($r.ExitCode)): $($r.Output)" }
 }
 
+function Start-FlareVmInstall {
+    $cfg = $script:config
+    $installer = Join-Path $cfg.LabDir 'flare-install.ps1'
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mandiant/flare-vm/$($cfg.FlareVmCommit)/install.ps1" -OutFile $installer
+    New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
+    Copy-LabToGuest -Config $cfg -HostPath $installer -GuestPath 'C:\lab\setup\install.ps1'
+    # FLARE's install.ps1 moves the custom config to Desktop\config.xml, so copy it again on every launch.
+    Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates/flare-config.xml') -GuestPath 'C:\lab\setup\flare-config.xml'
+    Write-LabLog 'Starting FLARE-VM install (reboots several times)'
+    Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @(
+        '-noWait', '-interactive', 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+        '-NoProfile', '-ExecutionPolicy', 'Unrestricted', '-File', 'C:\lab\setup\install.ps1',
+        '-password', $cfg.GuestPassword, '-noWait', '-noGui', '-noChecks',
+        '-customConfig', 'C:\lab\setup\flare-config.xml'
+    ) | Out-Null
+}
+
 function Invoke-FlareVmPhase {
     $cfg = $script:config
     $check = Join-Path $cfg.Root 'templates/guest/test-flare.ps1'
     $state = Invoke-LabGuestScript -Config $cfg -Path $check
-    if ($state.ExitCode -eq 2) {
-        $installer = Join-Path $cfg.LabDir 'flare-install.ps1'
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mandiant/flare-vm/$($cfg.FlareVmCommit)/install.ps1" -OutFile $installer
-        New-LabGuestDirectory -Config $cfg -GuestPath 'C:\lab\setup'
-        Copy-LabToGuest -Config $cfg -HostPath $installer -GuestPath 'C:\lab\setup\install.ps1'
-        Copy-LabToGuest -Config $cfg -HostPath (Join-Path $cfg.Root 'templates/flare-config.xml') -GuestPath 'C:\lab\setup\flare-config.xml'
-        Write-LabLog 'Starting FLARE-VM install (reboots several times; 1.5 to 2 h)'
-        Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @(
-            '-noWait', '-interactive', 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
-            '-NoProfile', '-ExecutionPolicy', 'Unrestricted', '-File', 'C:\lab\setup\install.ps1',
-            '-password', $cfg.GuestPassword, '-noWait', '-noGui', '-noChecks',
-            '-customConfig', 'C:\lab\setup\flare-config.xml'
-        ) | Out-Null
-    } else {
-        Write-LabLog "FLARE-VM already started: $($state.Output)"
-    }
+    if ($state.ExitCode -eq 2) { Start-FlareVmInstall } else { Write-LabLog "FLARE-VM already started: $($state.Output)" }
+
+    # test-flare.ps1 exit 4 = stalled; relaunch after 3 stalled polls in a row (6 min), at most twice.
+    # A hashtable, because the condition block runs in its own scope on every poll.
+    $poll = @{ Stalled = 0; Relaunches = 0 }
     Wait-LabCondition -Description 'FLARE-VM install' -TimeoutSec (4 * 3600) -PollSec 120 -Condition {
-        try {
-            $r = Invoke-LabGuestScript -Config $cfg -Path $check
-            Write-LabLog "  $(($r.Output -split "`r?`n")[0])" -Quiet
-            $r.ExitCode -eq 0
-        } catch { $false }
+        try { $r = Invoke-LabGuestScript -Config $cfg -Path $check } catch { return $false }
+        Write-LabLog "  $(($r.Output -split "`r?`n")[0])" -Quiet
+        if ($r.ExitCode -ne 4) { $poll.Stalled = 0; return $r.ExitCode -eq 0 }
+        $poll.Stalled++
+        if ($poll.Stalled -lt 3) { return $false }
+        if ($poll.Relaunches -ge 2) { throw "FLARE-VM install stalled after $($poll.Relaunches) relaunches:`n$($r.Output)" }
+        $poll.Relaunches++
+        $poll.Stalled = 0
+        Write-LabLog "FLARE-VM install stalled; relaunching ($($poll.Relaunches)/2)"
+        Start-FlareVmInstall
+        $false
     }
     $final = Invoke-LabGuestScript -Config $cfg -Path $check
     Write-LabLog "FLARE-VM finished: $($final.Output)"

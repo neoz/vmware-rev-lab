@@ -10,9 +10,10 @@ Describe 'Invoke-LabProcess' {
         $r.ExitCode | Should -Be 7
     }
 
-    It 'kills and throws on timeout' {
-        { Invoke-LabProcess -FilePath 'ping.exe' -ArgumentList @('-n', '30', '127.0.0.1') -TimeoutSec 1 } |
-            Should -Throw -ExpectedMessage '*Timed out*'
+    It 'kills and throws on timeout without echoing the arguments' {
+        $err = { Invoke-LabProcess -FilePath 'ping.exe' -ArgumentList @('-n', '30', 'S3cretArg') -TimeoutSec 1 } |
+            Should -Throw -ExpectedMessage '*Timed out*' -PassThru
+        $err.Exception.Message | Should -Not -Match 'S3cretArg'
     }
 }
 
@@ -93,6 +94,14 @@ Describe 'Invoke-Vmrun' {
             [pscustomobject]@{ ExitCode = 255; StdOut = 'Guest program exited with non-zero exit code: 3'; StdErr = '' }
         }
         (Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest).GuestExitCode | Should -Be 3
+    }
+
+    It 'reports a timeout with the masked command line' {
+        Mock Invoke-LabProcess -ModuleName LabCommon { throw 'Timed out after 1 s: vmrun.exe' }
+        $err = { Invoke-Vmrun -Config $cfg -Command runProgramInGuest -Guest -Arguments @('x.exe', '-password', 'S3cretPw') } |
+            Should -Throw -ExpectedMessage '*Timed out*' -PassThru
+        $err.Exception.Message | Should -Match '-gp \*\*\*'
+        $err.Exception.Message | Should -Not -Match 'S3cretPw'
     }
 
     It 'masks the guest password everywhere in the log' {

@@ -121,6 +121,15 @@ Describe 'Invoke-LabGuestScript' {
         $global:WrapText | Should -Match ([regex]::Escape("-Name 'it''s a file.exe'"))
     }
 
+    It 'escapes Unicode single quotes that PowerShell also treats as delimiters' {
+        $name = "it$([char]0x2019);Write-Output INJECTED;$([char]0x2018)x.exe"
+        Invoke-LabGuestScript -Config $cfg -Path $probe -Arguments @{ Name = $name } | Out-Null
+        $line = ($global:WrapText -split "`r?`n" | Where-Object { $_ -match '-Name' })
+        $parsed = [System.Management.Automation.Language.Parser]::ParseInput($line.Trim(), [ref]$null, [ref]$null)
+        $commands = $parsed.FindAll({ param($a) $a -is [System.Management.Automation.Language.CommandAst] }, $true)
+        @($commands).Count | Should -Be 1
+    }
+
     It 'runs the wrapper through Windows PowerShell, interactive when asked' {
         Invoke-LabGuestScript -Config $cfg -Path $probe -Interactive | Out-Null
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -ParameterFilter {

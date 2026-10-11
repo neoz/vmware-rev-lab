@@ -32,6 +32,8 @@ $runDir = Join-Path $caseDir ('runs/{0:yyyyMMdd-HHmmss}' -f (Get-Date))
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 $guest = Join-Path $config.Root 'templates/guest'
 
+$sampleStarted = $false
+$collected = $false
 Restore-LabClean -Config $config
 try {
     Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\in\sample.zip'
@@ -44,13 +46,21 @@ try {
     $start = ($monitors.Output -split "`r?`n")[-1].Trim()
 
     $runFile = Join-Path $runDir 'run.json'
-    @{ Path = $samplePath; Export = $Export; Arguments = $SampleArgs } | ConvertTo-Json | Set-Content -Path $runFile -Encoding utf8
+    # BOM so Windows PowerShell 5.1 reads non-ASCII sample names and arguments as UTF-8.
+    @{ Path = $samplePath; Export = $Export; Arguments = $SampleArgs } | ConvertTo-Json | Set-Content -Path $runFile -Encoding utf8BOM
     Copy-LabToGuest -Config $config -HostPath $runFile -GuestPath 'C:\lab\in\run.json'
-    Start-LabGuestScript -Config $config -Path (Join-Path $guest 'run-sample.ps1') -Arguments @{ RunFile = 'C:\lab\in\run.json' }
+    # run-sample.ps1 returns right after Start-Process, so wait for it and fail if the sample did not start.
+    $launch = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'run-sample.ps1') -Arguments @{ RunFile = 'C:\lab\in\run.json' } -Interactive
+    if ($launch.ExitCode -ne 0) { throw "Sample did not start: $($launch.Output)" }
+    $sampleStarted = $true
     Write-LabLog "Running $entry for $Timeout s"
     Start-Sleep -Seconds $Timeout
 
-    Invoke-Vmrun -Config $config -Command captureScreen -Arguments @((Join-Path $runDir 'screenshot.png')) -Guest | Out-Null
+    try {
+        Invoke-Vmrun -Config $config -Command captureScreen -Arguments @((Join-Path $runDir 'screenshot.png')) -Guest | Out-Null
+    } catch {
+        Write-LabLog "Screenshot failed (continuing): $($_.Exception.Message)"
+    }
     $collect = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'collect.ps1') -Arguments @{ Start = $start } -Interactive -TimeoutSec 1200
     Write-LabLog $collect.Output -Quiet
     if ($collect.ExitCode -ne 0) { throw "collect.ps1 failed: $($collect.Output)" }
@@ -61,9 +71,13 @@ try {
     Expand-Archive -Path $textZip -DestinationPath (Join-Path $runDir 'text')
     Remove-Item -Path $textZip
     Write-LabLog "Artefacts: $runDir"
+    $collected = $true
 } finally {
     if ($KeepRunning) {
         Write-LabLog 'VM left running (-KeepRunning). Run .\scripts\reset.ps1 when done.'
+    } elseif ($sampleStarted -and -not $collected) {
+        # Reverting now would destroy the guest-side Procmon/FakeNet/Sysmon data of this run.
+        Write-LabLog 'Collection failed; VM left as is (still isolated) so artefacts under C:\lab\out can be recovered. Run .\scripts\reset.ps1 afterwards.'
     } else {
         Restore-LabClean -Config $config
     }

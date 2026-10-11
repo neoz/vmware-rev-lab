@@ -15,6 +15,13 @@ BeforeAll {
 }
 
 Describe '.claude/settings.json' {
+    It 'denies the user-only network scripts and direct VM config or vmrun access' {
+        foreach ($rule in 'Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)',
+                          'Bash(*vmrun*)', 'PowerShell(*vmrun*)', 'Edit(**/*.vmx)', 'Write(**/*.vmx)') {
+            $settings.permissions.deny | Should -Contain $rule
+        }
+    }
+
     It 'never allows and denies the same tool' {
         $allow | Where-Object { $_ -in $deny } | Should -BeNullOrEmpty
     }
@@ -27,7 +34,9 @@ Describe '.claude/settings.json' {
         $patterns = @(
             '^ethernet_(set_|purge)', '^vm_nic_(create|delete)$', '^network_(create|portforward_set|portforward_delete)$',
             '^vmrun_portforward_(set|delete)$', '^vmrun_shared_(enable|add|set)$', '^hgfs_set_', '^vm_folder_(create|delete)$',
-            '^(vm_delete|vmrun_delete|snapshot_delete|vmrun_snapshot_delete)$', '^(vmrun_var_write|config_set|vmrun_device_connect)$'
+            '^(vm_delete|vmrun_delete|snapshot_delete|vmrun_snapshot_delete)$', '^(vmrun_var_write|config_set|vmrun_device_connect)$',
+            '^(vmrun_copy_from|guest_copy_from)$', '^(vmrun_snapshot_take|snapshot_take|snapshot_clone|vmrun_clone)$',
+            '^(template_create|template_deploy|vm_create)$', '^serial_(set_present|purge)$'
         )
         $mustDeny = $tools | Where-Object { $t = $_; $patterns | Where-Object { $t -match $_ } }
         $mustDeny | Should -Not -BeNullOrEmpty

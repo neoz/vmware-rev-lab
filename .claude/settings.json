@@ -49,7 +49,26 @@
       "mcp__vmware-mcp__hgfs_set_path",
       "mcp__vmware-mcp__hgfs_set_name",
       "mcp__vmware-mcp__hgfs_set_read",
-      "mcp__vmware-mcp__hgfs_set_write"
+      "mcp__vmware-mcp__hgfs_set_write",
+      "mcp__vmware-mcp__vmrun_copy_from",
+      "mcp__vmware-mcp__guest_copy_from",
+      "mcp__vmware-mcp__vmrun_snapshot_take",
+      "mcp__vmware-mcp__snapshot_take",
+      "mcp__vmware-mcp__snapshot_clone",
+      "mcp__vmware-mcp__vmrun_clone",
+      "mcp__vmware-mcp__template_create",
+      "mcp__vmware-mcp__template_deploy",
+      "mcp__vmware-mcp__vm_create",
+      "mcp__vmware-mcp__serial_set_present",
+      "mcp__vmware-mcp__serial_purge",
+      "Bash(*net.ps1*Setup*)",
+      "PowerShell(*net.ps1*Setup*)",
+      "Bash(*add-tool.ps1*)",
+      "PowerShell(*add-tool.ps1*)",
+      "Bash(*vmrun*)",
+      "PowerShell(*vmrun*)",
+      "Edit(**/*.vmx)",
+      "Write(**/*.vmx)"
     ]
   }
 }
