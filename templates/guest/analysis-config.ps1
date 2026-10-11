@@ -3,6 +3,16 @@
 param([string]$SysmonConfig, [string]$FridaToolsVersion, [string]$DotnetSdkVersion, [string]$IlspyCmdVersion)
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path 'C:\lab\in', 'C:\lab\out', 'C:\lab\setup' | Out-Null
+$env:DOTNET_NOLOGO = '1'
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+
+# Windows PowerShell turns any stderr line of a redirected native command into an error under 'Stop'
+# (dotnet, Sysmon and pip all write banners there), so run natives under 'Continue' and judge by exit code.
+function Invoke-Native([string]$File, [string[]]$Arguments) {
+    $ErrorActionPreference = 'Continue'
+    $output = & $File @Arguments 2>&1 | Out-String
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
 
 # .NET 3.5 (for old .NET samples) comes from the Windows ISO, still attached at this point;
 # the choco package needs Windows Update, which is disabled.
@@ -10,36 +20,30 @@ if ((Get-WindowsOptionalFeature -Online -FeatureName NetFx3).State -ne 'Enabled'
     $sxs = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Join-Path $_.Root 'sources\sxs' } |
         Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $sxs) { throw 'Windows ISO (sources\sxs) not found for NetFx3' }
-    & dism.exe /Online /Enable-Feature /FeatureName:NetFx3 /All /LimitAccess /Source:$sxs /NoRestart | Out-Null
-    if ($LASTEXITCODE -notin 0, 3010) { throw "DISM NetFx3 failed (exit $LASTEXITCODE)" }
+    $r = Invoke-Native 'dism.exe' @('/Online', '/Enable-Feature', '/FeatureName:NetFx3', '/All', '/LimitAccess', "/Source:$sxs", '/NoRestart')
+    if ($r.ExitCode -notin 0, 3010) { throw "DISM NetFx3 failed (exit $($r.ExitCode)):`n$($r.Output)" }
 }
 
-& py -3.13 -m pip install --disable-pip-version-check --quiet "frida-tools==$FridaToolsVersion"
-if ($LASTEXITCODE -ne 0) { throw "pip install frida-tools failed (exit $LASTEXITCODE)" }
-$pythonDir = & py -3.13 -c "import os, sys; print(os.path.dirname(sys.executable))"
+$r = Invoke-Native 'py' @('-3.13', '-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "frida-tools==$FridaToolsVersion")
+if ($r.ExitCode -ne 0) { throw "pip install frida-tools failed (exit $($r.ExitCode)):`n$($r.Output)" }
+$pythonDir = (& py -3.13 -c "import os, sys; print(os.path.dirname(sys.executable))").Trim()
 
 # community.chocolatey.org answers 504 now and then, so retry; skip when the SDK is already there.
 $attempt = 0
 while (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) {
     $attempt++
-    $chocoOut = & choco install dotnet-sdk --version $DotnetSdkVersion -y --no-progress 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) {
-        if (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) { throw "dotnet SDK $DotnetSdkVersion missing after install:`n$chocoOut" }
+    $r = Invoke-Native 'choco' @('install', 'dotnet-sdk', '--version', $DotnetSdkVersion, '-y', '--no-progress')
+    if ($r.ExitCode -eq 0) {
+        if (-not (Test-Path "C:\Program Files\dotnet\sdk\$DotnetSdkVersion")) { throw "dotnet SDK $DotnetSdkVersion missing after install:`n$($r.Output)" }
         continue
     }
-    if ($attempt -ge 3) { throw "choco install dotnet-sdk failed (exit $LASTEXITCODE):`n$chocoOut" }
+    if ($attempt -ge 3) { throw "choco install dotnet-sdk failed (exit $($r.ExitCode)):`n$($r.Output)" }
     Start-Sleep -Seconds 30
 }
 $dotnetTools = 'C:\Tools\dotnet-tools'
 if (-not (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe'))) {
-    # dotnet prints its first-run banner on stderr; under 'Stop' Windows PowerShell turns that into an error.
-    $env:DOTNET_NOLOGO = '1'
-    $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
-    $ErrorActionPreference = 'Continue'
-    $dotnetOut = & 'C:\Program Files\dotnet\dotnet.exe' tool install ilspycmd --version $IlspyCmdVersion --tool-path $dotnetTools 2>&1 | Out-String
-    $dotnetExit = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    if ($dotnetExit -ne 0) { throw "dotnet tool install ilspycmd failed (exit $dotnetExit):`n$dotnetOut" }
+    $r = Invoke-Native 'C:\Program Files\dotnet\dotnet.exe' @('tool', 'install', 'ilspycmd', '--version', $IlspyCmdVersion, '--tool-path', $dotnetTools)
+    if ($r.ExitCode -ne 0) { throw "dotnet tool install ilspycmd failed (exit $($r.ExitCode)):`n$($r.Output)" }
 }
 
 # WinDbg ships as an MSIX package; cdb.exe lives in its install location, which cannot be searched recursively.
@@ -83,12 +87,9 @@ $missing = @($tools.Keys | Where-Object { -not $tools[$_] -or -not (Test-Path $t
 if ($missing) { throw "Tools not found: $($missing -join ', ')" }
 $tools | ConvertTo-Json | Set-Content -Path 'C:\lab\tools.json' -Encoding UTF8
 
-if (Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue) {
-    & $tools.Sysmon -accepteula -c $SysmonConfig
-} else {
-    & $tools.Sysmon -accepteula -i $SysmonConfig
-}
-if ($LASTEXITCODE -ne 0) { throw "Sysmon configuration failed (exit $LASTEXITCODE)" }
+$mode = if (Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue) { '-c' } else { '-i' }
+$r = Invoke-Native $tools.Sysmon @('-accepteula', $mode, $SysmonConfig)
+if ($r.ExitCode -ne 0) { throw "Sysmon configuration failed (exit $($r.ExitCode)):`n$($r.Output)" }
 
 $tools.GetEnumerator() | ForEach-Object { Write-Output "$($_.Key)=$($_.Value)" }
 exit 0
