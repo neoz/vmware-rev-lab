@@ -413,6 +413,25 @@ function Start-LabVm {
     }
 }
 
+function Get-LabSessionNotice {
+    # SessionStart hook output: warns the user and Claude when the VM is off, since the guest MCP bridges cannot connect then.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    try {
+        if (Test-LabVmRunning -Config $Config) { return $null }
+        $problem = "Lab VM is not running, so revlab-ghidra and revlab-windbg cannot connect."
+    } catch {
+        $problem = "Could not check the lab VM state: $($_.Exception.Message)"
+    }
+    $fix = 'Run: pwsh -File scripts/reset.ps1, then reconnect revlab-ghidra and revlab-windbg in /mcp.'
+    @{
+        systemMessage      = "$problem $fix"
+        hookSpecificOutput = @{
+            hookEventName     = 'SessionStart'
+            additionalContext = "$problem Before using revlab-ghidra or revlab-windbg, ask the user to run 'pwsh -File scripts/reset.ps1' and reconnect the servers in /mcp."
+        }
+    } | ConvertTo-Json -Compress
+}
+
 function Stop-LabVm {
     param([Parameter(Mandatory)][hashtable]$Config)
     if (Test-LabVmRunning -Config $Config) {

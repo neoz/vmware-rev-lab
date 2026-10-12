@@ -178,3 +178,25 @@ Describe 'Test-LabRelaysRunning' {
         Test-LabRelaysRunning -Config $cfg | Should -BeTrue
     }
 }
+
+Describe 'Get-LabSessionNotice' {
+    BeforeAll { $cfg = @{ VmxPath = 'C:\vm\x.vmx' } }
+
+    It 'says nothing when the VM is running' {
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Get-LabSessionNotice -Config $cfg | Should -BeNullOrEmpty
+    }
+
+    It 'warns the user and Claude when the VM is off' {
+        Mock Test-LabVmRunning -ModuleName LabCommon { $false }
+        $notice = Get-LabSessionNotice -Config $cfg | ConvertFrom-Json
+        $notice.systemMessage | Should -BeLike '*not running*reset.ps1*/mcp*'
+        $notice.hookSpecificOutput.hookEventName | Should -Be 'SessionStart'
+        $notice.hookSpecificOutput.additionalContext | Should -BeLike '*not running*reset.ps1*'
+    }
+
+    It 'reports a failed check instead of failing the hook' {
+        Mock Test-LabVmRunning -ModuleName LabCommon { throw 'vmrun.exe not found' }
+        (Get-LabSessionNotice -Config $cfg | ConvertFrom-Json).systemMessage | Should -BeLike '*Could not check*vmrun.exe not found*'
+    }
+}

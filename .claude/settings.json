@@ -72,5 +72,19 @@
       "PowerShell(*vmrun*)",
       "Edit(**/*.vmx)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/scripts/check-vm.ps1\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

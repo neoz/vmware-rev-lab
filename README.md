@@ -94,7 +94,8 @@ the changes with `pwsh -File scripts/net.ps1 -Mode Analysis`.
 The VM must be running before Claude Code starts. `revlab-ghidra` and
 `revlab-windbg` are host-side bridges to relays inside the guest; if the VM is
 off they time out and Claude Code marks them as failed. Nothing starts the VM
-automatically when Claude Code starts.
+automatically; a SessionStart hook (`scripts/check-vm.ps1`) only warns you
+when Claude Code starts and the VM is off.
 
 ```powershell
 pwsh -File scripts/reset.ps1   # revert to the clean snapshot and start the VM

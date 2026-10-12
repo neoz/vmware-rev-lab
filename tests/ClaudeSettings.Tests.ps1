@@ -26,6 +26,12 @@ Describe '.claude/settings.json' {
         $settings.permissions.deny + $settings.permissions.allow | Where-Object { $_ -like 'Write(*' } | Should -BeNullOrEmpty
     }
 
+    It 'runs check-vm.ps1 at session start' {
+        $hook = $settings.hooks.SessionStart.hooks | Where-Object { $_.command -like '*scripts/check-vm.ps1*' }
+        $hook | Should -Not -BeNullOrEmpty
+        Test-Path (Join-Path $PSScriptRoot '../scripts/check-vm.ps1') | Should -BeTrue
+    }
+
     It 'never allows and denies the same tool' {
         $allow | Where-Object { $_ -in $deny } | Should -BeNullOrEmpty
     }
