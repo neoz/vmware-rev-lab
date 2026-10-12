@@ -89,6 +89,23 @@ the changes with `pwsh -File scripts/net.ps1 -Mode Analysis`.
 
 ## Basic usage
 
+### Start a session
+
+The VM must be running before Claude Code starts. `revlab-ghidra` and
+`revlab-windbg` are host-side bridges to relays inside the guest; if the VM is
+off they time out and Claude Code marks them as failed. Nothing starts the VM
+automatically when Claude Code starts.
+
+```powershell
+pwsh -File scripts/reset.ps1   # revert to the clean snapshot and start the VM
+claude                         # then start Claude Code in the repository root
+```
+
+Check with `/mcp` that `vmware-mcp`, `revlab-ghidra` and `revlab-windbg` are
+connected. If Claude Code was already open, or a server dropped after a
+revert, reconnect it from `/mcp`; the guest relays need about 30 seconds after
+a revert.
+
 ### Create a case
 
 Put the sample in a password-protected zip (password `infected`) under
