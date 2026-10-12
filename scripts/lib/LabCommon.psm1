@@ -94,10 +94,12 @@ function Invoke-LabProcess {
         throw "Timed out after $TimeoutSec s: $FilePath"
     }
     $process.WaitForExit()
+    # Children such as vmware.exe (from `vmrun start gui`) inherit the pipes and keep them open.
+    [void][System.Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)
     [pscustomobject]@{
         ExitCode = $process.ExitCode
-        StdOut   = $stdout.Result.Trim()
-        StdErr   = $stderr.Result.Trim()
+        StdOut   = if ($stdout.IsCompleted) { $stdout.Result.Trim() } else { '' }
+        StdErr   = if ($stderr.IsCompleted) { $stderr.Result.Trim() } else { '' }
     }
 }
 
