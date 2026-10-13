@@ -17,7 +17,8 @@ BeforeAll {
 Describe '.claude/settings.json' {
     It 'denies the user-only network scripts, direct VM config, the vmrun binary and its risky verbs' {
         $verbs = 'copyFileFromGuestToHost', 'SharedFolder', 'deleteSnapshot', 'deleteVM', 'writeVariable', 'NamedDevice'
-        $rules = @('Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)', 'Edit(**/*.vmx)')
+        $rules = @('Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)',
+                   'Bash(*add-ida.ps1*)', 'PowerShell(*add-ida.ps1*)', 'Edit(**/*.vmx)')
         foreach ($tool in 'Bash', 'PowerShell') {
             $rules += "$tool(vmrun)", "$tool(vmrun *)", "$tool(*vmrun.exe*)", "$tool(*vmrun -T*)", "$tool(*vmrun*.vmx*)",
                       "$tool(*vmrun`"*)", "$tool(*vmrun'*)"
@@ -57,6 +58,7 @@ Describe '.claude/settings.json' {
             @{ Command = 'pwsh -NoProfile -Command "vmrun -T ws clone C:\vm\x.vmx C:\vm\y.vmx full"' }
             @{ Command = "'vmrun' list" }
             @{ Command = 'Start-Process vmrun -ArgumentList start,C:\vm\x.vmx' }
+            @{ Command = 'pwsh -File scripts/add-ida.ps1' }
         ) {
             Test-Denied 'PowerShell' $Command | Should -BeTrue
             Test-Denied 'Bash' $Command | Should -BeTrue
@@ -81,6 +83,12 @@ Describe '.claude/settings.json' {
         $hook = $settings.hooks.SessionStart.hooks | Where-Object { $_.command -like '*scripts/check-vm.ps1*' }
         $hook | Should -Not -BeNullOrEmpty
         Test-Path (Join-Path $PSScriptRoot '../scripts/check-vm.ps1') | Should -BeTrue
+    }
+
+    It 'allows the six revlab-ida tools, including execute_python' {
+        foreach ($tool in 'open_database', 'execute_python', 'reference', 'list_databases', 'save_database', 'close_database') {
+            $settings.permissions.allow | Should -Contain "mcp__revlab-ida__$tool"
+        }
     }
 
     It 'never allows and denies the same tool' {

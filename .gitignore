@@ -13,6 +13,9 @@ lab.local.psd1
 # vmware-mcp clone and its venv
 tools/vmware-mcp/
 
+# IDA Pro installer and license (user-supplied, never committed)
+tools/ida/
+
 # Analysis targets and artefacts
 cases/
 
