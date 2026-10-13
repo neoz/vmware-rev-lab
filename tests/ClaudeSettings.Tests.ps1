@@ -15,10 +15,61 @@ BeforeAll {
 }
 
 Describe '.claude/settings.json' {
-    It 'denies the user-only network scripts and direct VM config or vmrun access' {
-        foreach ($rule in 'Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)',
-                          'Bash(*vmrun*)', 'PowerShell(*vmrun*)', 'Edit(**/*.vmx)') {
-            $settings.permissions.deny | Should -Contain $rule
+    It 'denies the user-only network scripts, direct VM config, the vmrun binary and its risky verbs' {
+        $verbs = 'copyFileFromGuestToHost', 'SharedFolder', 'deleteSnapshot', 'deleteVM', 'writeVariable', 'NamedDevice'
+        $rules = @('Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)', 'Edit(**/*.vmx)')
+        foreach ($tool in 'Bash', 'PowerShell') {
+            $rules += "$tool(vmrun)", "$tool(vmrun *)", "$tool(*vmrun.exe*)", "$tool(*vmrun -T*)", "$tool(*vmrun*.vmx*)",
+                      "$tool(*vmrun`"*)", "$tool(*vmrun'*)"
+            $rules += $verbs | ForEach-Object { "$tool(*$_*)" }
+        }
+        foreach ($rule in $rules) { $settings.permissions.deny | Should -Contain $rule }
+    }
+
+    It 'does not deny every command that merely mentions vmrun' {
+        $settings.permissions.deny | Should -Not -Contain 'Bash(*vmrun*)'
+        $settings.permissions.deny | Should -Not -Contain 'PowerShell(*vmrun*)'
+    }
+
+    Context 'shell deny rules, matched the way Claude Code documents (* is any text, case-insensitive)' {
+        BeforeAll {
+            function Test-Denied([string]$Tool, [string]$Command) {
+                foreach ($rule in $settings.permissions.deny) {
+                    if ($rule -notmatch "^$Tool\((.*)\)$") { continue }
+                    $pattern = '^' + ([regex]::Escape($Matches[1]) -replace '\\\*', '.*') + '$'
+                    if ($Command -match $pattern) { return $true }
+                }
+                $false
+            }
+        }
+
+        It 'denies <Command>' -ForEach @(
+            @{ Command = 'vmrun -T ws list' }
+            @{ Command = 'vmrun' }
+            @{ Command = "& 'C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe' -T ws list" }
+            @{ Command = 'vmrun.exe -T ws listSnapshots C:\vm\x.vmx' }
+            @{ Command = 'tool -T ws copyFileFromGuestToHost x.vmx a b' }
+            @{ Command = 'tool -T ws enableSharedFolders x.vmx' }
+            @{ Command = 'tool -T ws deleteSnapshot x.vmx clean' }
+            @{ Command = 'tool -T ws writeVariable x.vmx runtimeConfig a b' }
+            @{ Command = '& "C:\Program Files (x86)\VMware\VMware Workstation\vmrun" -T ws list' }
+            @{ Command = 'cmd /c vmrun -T ws snapshot C:\vm\x.vmx before' }
+            @{ Command = 'pwsh -NoProfile -Command "vmrun -T ws clone C:\vm\x.vmx C:\vm\y.vmx full"' }
+            @{ Command = "'vmrun' list" }
+            @{ Command = 'Start-Process vmrun -ArgumentList start,C:\vm\x.vmx' }
+        ) {
+            Test-Denied 'PowerShell' $Command | Should -BeTrue
+            Test-Denied 'Bash' $Command | Should -BeTrue
+        }
+
+        It 'allows <Command>' -ForEach @(
+            @{ Command = 'Invoke-Pester -Path tests/Vmrun.Tests.ps1 -Output Detailed' }
+            @{ Command = 'git commit -m "fix: vmrun start gui hang"' }
+            @{ Command = 'git log -S vmrun -- .claude/settings.json' }
+            @{ Command = 'pwsh -File scripts/reset.ps1' }
+        ) {
+            Test-Denied 'PowerShell' $Command | Should -BeFalse
+            Test-Denied 'Bash' $Command | Should -BeFalse
         }
     }
 
