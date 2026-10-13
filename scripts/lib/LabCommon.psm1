@@ -751,6 +751,7 @@ function Assert-LabIsolation {
     # The guest-side test also passes on NAT once the static IP is set, so check the VM's NIC first.
     $mode = Get-LabVmxNetworkMode -Config $Config
     if ($mode -ne 'Analysis') { throw "VM network is '$mode', not on the analysis LAN segment." }
+    Write-LabLog 'Checking guest isolation (about 1-2 minutes)'
     $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/test-isolation.ps1') -Arguments @{
         HostIps = (Get-LabHostIPv4) -join ','
     } -TimeoutSec 300
