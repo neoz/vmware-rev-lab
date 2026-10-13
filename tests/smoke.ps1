@@ -106,7 +106,14 @@ Test-Step '8. revlab-windbg attaches to a debug launch and runs lm' {
 Test-Step '9. reset.ps1 returns when its output is captured through a pipe' {
     # Claude Code reads script output through a pipe; vmware.exe started by the revert must not hold it open.
     $reset = Join-Path $root 'scripts/reset.ps1'
-    $job = Start-Job { param($Path) pwsh -NoProfile -File $Path -NoSave 2>&1 | Out-String } -ArgumentList $reset
+    # The job process would otherwise inherit our own stdout as a plain handle and pass it down to
+    # vmware.exe, which then keeps whoever captures this smoke test waiting after it exits.
+    $saved = @(Disable-LabStdHandleInheritance)
+    try {
+        $job = Start-Job { param($Path) pwsh -NoProfile -File $Path -NoSave 2>&1 | Out-String } -ArgumentList $reset
+    } finally {
+        Restore-LabStdHandleInheritance -Saved $saved
+    }
     try {
         if (-not (Wait-Job $job -Timeout 600)) { throw 'reset.ps1 did not return within 600 s (inherited stdout pipe?)' }
         $out = Receive-Job $job
