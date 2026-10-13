@@ -28,13 +28,14 @@ Remove-Item -Path $staging -Recurse -Force
 
 $python = "$mcp\venv-ida\Scripts\python.exe"
 if (-not (Test-Path $python)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-ida")) 'venv venv-ida' }
-# IDA ships the idalib bindings as a wheel (idapro-<ver>-py3-none-any.whl) under idalib\python.
-$idaproWheel = Get-ChildItem -Path "$idaDir\idalib\python" -Filter 'idapro-*.whl' | Select-Object -First 1
-if (-not $idaproWheel) { throw "No idapro wheel in $idaDir\idalib\python" }
-Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$IdaMcpVersion", 'ida-hcli==0.26.3', $idaproWheel.FullName)) 'pip ida-mcp ida-hcli idapro'
-$env:IDADIR = $idaDir
-Assert-Native (Invoke-Native "$mcp\venv-ida\Scripts\hcli.exe" @('ida', 'accept-eula')) 'hcli ida accept-eula'
-Assert-Native (Invoke-Native $python @("$idaDir\idalib\python\py-activate-idalib.py", '-d', $idaDir)) 'activate idalib'
+# ida-mcp pulls idapro from PyPI; the older wheel IDA ships in idalib\python conflicts with ida-nexus.
+# The installer already activated idalib for this IDA (--activate_idalib defaults to 1).
+Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$IdaMcpVersion")) 'pip ida-mcp'
+# hcli only accepts the EULA; its own venv keeps its dependencies away from ida-mcp's.
+$hcliPython = "$mcp\venv-hcli\Scripts\python.exe"
+if (-not (Test-Path $hcliPython)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-hcli")) 'venv venv-hcli' }
+Assert-Native (Invoke-Native $hcliPython @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', 'ida-hcli==0.26.3')) 'pip ida-hcli'
+Assert-Native (Invoke-Native "$mcp\venv-hcli\Scripts\hcli.exe" @('ida', 'accept-eula', $idaDir)) 'hcli ida accept-eula'
 # Loading idalib checks the license, so a bad license fails here instead of in Claude's first open_database.
 Assert-Native (Invoke-Native $python @('-c', 'import idapro')) 'import idapro'
 
