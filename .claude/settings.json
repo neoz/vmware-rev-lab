@@ -20,7 +20,11 @@
       "mcp__vmware-mcp__hgfs_query",
       "mcp__revlab-ghidra__wait_for_analysis",
       "mcp__revlab-ghidra__list_functions",
-      "mcp__revlab-ghidra__decompile_function"
+      "mcp__revlab-ghidra__decompile_function",
+      "PowerShell(pwsh -File scripts/*)",
+      "PowerShell(pwsh -NoProfile -File scripts/*)",
+      "Bash(pwsh -File scripts/*)",
+      "Bash(pwsh -NoProfile -File scripts/*)"
     ],
     "deny": [
       "mcp__vmware-mcp__vm_delete",
