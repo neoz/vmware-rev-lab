@@ -469,16 +469,16 @@ function Get-LabSessionNotice {
     param([Parameter(Mandatory)][hashtable]$Config)
     try {
         if (Test-LabVmRunning -Config $Config) { return $null }
-        $problem = "Lab VM is not running, so revlab-ghidra and revlab-windbg cannot connect."
+        $problem = "Lab VM is not running, so the revlab-* MCP servers cannot connect."
     } catch {
         $problem = "Could not check the lab VM state: $($_.Exception.Message)"
     }
-    $fix = 'Run: pwsh -File scripts/reset.ps1, then reconnect revlab-ghidra and revlab-windbg in /mcp.'
+    $fix = 'Run: pwsh -File scripts/reset.ps1, then reconnect the revlab-* servers in /mcp.'
     @{
         systemMessage      = "$problem $fix"
         hookSpecificOutput = @{
             hookEventName     = 'SessionStart'
-            additionalContext = "$problem Before using revlab-ghidra or revlab-windbg, ask the user to run 'pwsh -File scripts/reset.ps1' and reconnect the servers in /mcp."
+            additionalContext = "$problem Before using a revlab-* server, ask the user to run 'pwsh -File scripts/reset.ps1' and reconnect the servers in /mcp."
         }
     } | ConvertTo-Json -Compress
 }
@@ -711,23 +711,26 @@ function New-LabMcpJson {
                         '--vmrun', $Config.Vmrun, '--guest-user', $Config.GuestUser, '--local-config', $local)
         }
     }
-    [ordered]@{
-        mcpServers = [ordered]@{
-            'vmware-mcp'    = [ordered]@{
-                type    = 'stdio'
-                command = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\vmware-mcp.exe'
-                args    = @()
-                env     = [ordered]@{
-                    VMRUN_PATH      = $Config.Vmrun
-                    VMCLI_PATH      = $Config.Vmcli
-                    VMWARE_USERNAME = '${VMWARE_USERNAME:-}'
-                    VMWARE_PASSWORD = '${VMWARE_PASSWORD:-}'
-                }
+    $servers = [ordered]@{
+        'vmware-mcp'    = [ordered]@{
+            type    = 'stdio'
+            command = Join-Path $Config.Root 'tools\vmware-mcp\.venv\Scripts\vmware-mcp.exe'
+            args    = @()
+            env     = [ordered]@{
+                VMRUN_PATH      = $Config.Vmrun
+                VMCLI_PATH      = $Config.Vmcli
+                VMWARE_USERNAME = '${VMWARE_USERNAME:-}'
+                VMWARE_PASSWORD = '${VMWARE_PASSWORD:-}'
             }
-            'revlab-ghidra' = & $bridgeServer $Config.McpGhidraPort 'RevlabMcpGhidra'
-            'revlab-windbg' = & $bridgeServer $Config.McpWindbgPort 'RevlabMcpWindbg'
         }
-    } | ConvertTo-Json -Depth 5
+        'revlab-ghidra' = & $bridgeServer $Config.McpGhidraPort 'RevlabMcpGhidra'
+        'revlab-windbg' = & $bridgeServer $Config.McpWindbgPort 'RevlabMcpWindbg'
+    }
+    # revlab-ida exists only after the user ran add-ida.ps1, which records AddIda in the state.
+    if ($Config.ContainsKey('StatePath') -and 'AddIda' -in @(Get-LabState -Path $Config.StatePath)) {
+        $servers['revlab-ida'] = & $bridgeServer $Config.McpIdaPort 'RevlabMcpIda'
+    }
+    [ordered]@{ mcpServers = $servers } | ConvertTo-Json -Depth 5
 }
 
 function Get-LabHostIPv4 {
@@ -890,12 +893,12 @@ function Update-LabToolsIndex {
 }
 
 function Test-LabRelaysRunning {
-    param([Parameter(Mandatory)][hashtable]$Config)
+    param([Parameter(Mandatory)][hashtable]$Config, [int]$Count = 2)
     try {
         $out = (Invoke-Vmrun -Config $Config -Command listProcessesInGuest -Guest -RetryCount 0).Output
     } catch { return $false }
-    # listProcessesInGuest shows image names only; the two relays are the only pythonw.exe in the clean guest.
-    @($out -split "`r?`n" | Where-Object { $_ -match 'cmd=pythonw\.exe' }).Count -ge 2
+    # listProcessesInGuest shows image names only; the relays are the only pythonw.exe in the clean guest.
+    @($out -split "`r?`n" | Where-Object { $_ -match 'cmd=pythonw\.exe' }).Count -ge $Count
 }
 
 function Test-LabMcpBridge {
@@ -906,6 +909,39 @@ function Test-LabMcpBridge {
         (Join-Path $Config.Root '.mcp.json'), $Server, 'count') -TimeoutSec 300
     if ($r.ExitCode -ne 0 -or $r.StdOut -notmatch 'tools=(\d+)') { throw "MCP bridge '$Server' failed: $($r.StdOut) $($r.StdErr)" }
     [int]$Matches[1]
+}
+
+function Get-LabIdaInputs {
+    # The host files add-ida.ps1 copies into the guest; checked before the guest goes on NAT.
+    # Files under tools/ida/data go over the IDA install, so executables are refused there.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $dir = Join-Path $Config.Root 'tools/ida'
+    $inputs = [ordered]@{
+        Installer = Join-Path $dir 'ida-pro_94_x64win.exe'
+        License   = Join-Path $dir 'idapro.hexlic'
+        DataDir   = Join-Path $dir 'data'
+        Data      = @()
+    }
+    foreach ($path in $inputs.Installer, $inputs.License) {
+        if (-not (Test-Path $path)) { throw "Missing $path; put the IDA Pro installer and license in tools/ida/." }
+    }
+    if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse | ForEach-Object FullName) }
+    foreach ($path in $inputs.Data) {
+        $head = [byte[]]::new(2)
+        $stream = [System.IO.File]::OpenRead($path)
+        try { $read = $stream.Read($head, 0, 2) } finally { $stream.Dispose() }
+        if ($read -eq 2 -and $head[0] -eq 0x4D -and $head[1] -eq 0x5A) {
+            throw "$path is an executable (MZ header); tools/ida/data may only hold non-executable files."
+        }
+    }
+    $inputs
+}
+
+function Set-LabIdaInstalled {
+    # Records that add-ida.ps1 finished, so New-LabMcpJson adds revlab-ida.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $completed = @(Get-LabState -Path $Config.StatePath)
+    if ('AddIda' -notin $completed) { Set-LabState -Path $Config.StatePath -Completed ($completed + 'AddIda') }
 }
 
 function Test-LabGuestDirectory {
@@ -964,7 +1000,7 @@ function Get-LabDebugRun {
 }
 
 function Save-LabCase {
-    # Zips the guest's C:\lab\in\sample (sample + re-mcp databases) into cases/<case>/static/ghidra.zip.
+    # Zips the guest's C:\lab\in\sample (sample + Ghidra and IDA databases) into cases/<case>/static/ghidra.zip.
     param([Parameter(Mandatory)][hashtable]$Config, [string]$Case)
     if (-not $Case) { $Case = Get-LabCurrentCase -Config $Config }
     if (-not $Case) { return $false }

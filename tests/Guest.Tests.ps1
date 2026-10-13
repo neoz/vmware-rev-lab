@@ -192,6 +192,17 @@ Describe 'Test-LabRelaysRunning' {
         }
         Test-LabRelaysRunning -Config $cfg | Should -BeTrue
     }
+
+    It 'waits for the IDA relay with -Count 3 and tolerates extra pythonw' {
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ GuestExitCode = 0; Output = "pid=1, owner=x, cmd=pythonw.exe`npid=2, owner=x, cmd=pythonw.exe" }
+        }
+        Test-LabRelaysRunning -Config $cfg -Count 3 | Should -BeFalse
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ GuestExitCode = 0; Output = (1..4 | ForEach-Object { "pid=$_, owner=x, cmd=pythonw.exe" }) -join "`n" }
+        }
+        Test-LabRelaysRunning -Config $cfg -Count 3 | Should -BeTrue
+    }
 }
 
 Describe 'Get-LabSessionNotice' {

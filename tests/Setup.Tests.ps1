@@ -59,6 +59,25 @@ Describe 'New-LabMcpJson' {
             ($server.args -join ' ') | Should -Match '--local-config D:\\lab\\lab.local.psd1'
         }
     }
+
+    It 'leaves out revlab-ida until add-ida.ps1 has recorded AddIda' {
+        $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain 'revlab-ida'
+        $state = Join-Path $TestDrive 'no-ida-state.json'
+        '{"Completed":["Preflight","McpBridge"]}' | Set-Content $state
+        $noIda = New-LabMcpJson -Config ($cfg + @{ StatePath = $state; McpIdaPort = 5003 }) | ConvertFrom-Json
+        $noIda.mcpServers.PSObject.Properties.Name | Should -Not -Contain 'revlab-ida'
+    }
+
+    It 'adds revlab-ida on its own port once AddIda is recorded, keeping the other bridges' {
+        $state = Join-Path $TestDrive 'ida-state.json'
+        '{"Completed":["Preflight","McpBridge","AddIda"]}' | Set-Content $state
+        $withIda = New-LabMcpJson -Config ($cfg + @{ StatePath = $state; McpIdaPort = 5003 }) | ConvertFrom-Json
+        $server = $withIda.mcpServers.'revlab-ida'
+        $server.args[1] | Should -Be 'D:\lab\scripts\mcp\revlab_bridge.py'
+        ($server.args -join ' ') | Should -Match '--port 5003 --task RevlabMcpIda '
+        $withIda.mcpServers.PSObject.Properties.Name | Should -Contain 'revlab-ghidra'
+        $withIda.mcpServers.PSObject.Properties.Name | Should -Contain 'revlab-windbg'
+    }
 }
 
 Describe 'New-LabVm' {
@@ -139,5 +158,56 @@ Describe 'Save-LabIso' {
         Mock Invoke-LabProcess -ModuleName LabCommon { throw 'should not download' }
         $hash = (Get-FileHash $iso).Hash
         { Save-LabIso -Url 'https://x/y.iso' -Path $iso -Sha256 $hash } | Should -Not -Throw
+    }
+}
+
+Describe 'Get-LabIdaInputs' {
+    BeforeEach {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $root 'tools/ida') | Out-Null
+    }
+
+    It 'returns the installer, the license and every file under data/, sub-folders included' {
+        foreach ($name in 'ida-pro_94_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
+        New-Item -ItemType Directory -Force -Path (Join-Path $root 'tools/ida/data/cfg') | Out-Null
+        'note' | Set-Content (Join-Path $root 'tools/ida/data/IDA-MCP.md')
+        'cfg' | Set-Content (Join-Path $root 'tools/ida/data/cfg/idauser.cfg')
+        $inputs = Get-LabIdaInputs -Config @{ Root = $root }
+        $inputs.Installer | Should -Be (Join-Path $root 'tools/ida/ida-pro_94_x64win.exe')
+        $inputs.License | Should -Be (Join-Path $root 'tools/ida/idapro.hexlic')
+        $inputs.DataDir | Should -Be (Join-Path $root 'tools/ida/data')
+        @($inputs.Data | Sort-Object) | Should -Be @((Join-Path $root 'tools/ida/data/cfg/idauser.cfg'), (Join-Path $root 'tools/ida/data/IDA-MCP.md') | Sort-Object)
+    }
+
+    It 'returns no data files when data/ is absent' {
+        foreach ($name in 'ida-pro_94_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
+        @((Get-LabIdaInputs -Config @{ Root = $root }).Data).Count | Should -Be 0
+    }
+
+    It 'names the missing <Missing>' -ForEach @(
+        @{ Present = 'idapro.hexlic'; Missing = 'ida-pro_94_x64win.exe' }
+        @{ Present = 'ida-pro_94_x64win.exe'; Missing = 'idapro.hexlic' }
+    ) {
+        'x' | Set-Content (Join-Path $root "tools/ida/$Present")
+        { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage "*$Missing*"
+    }
+
+    It 'refuses an executable under data/ and leaves it in place' {
+        foreach ($name in 'ida-pro_94_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
+        New-Item -ItemType Directory -Force -Path (Join-Path $root 'tools/ida/data/sub') | Out-Null
+        $pe = Join-Path $root 'tools/ida/data/sub/renamed.txt'
+        [System.IO.File]::WriteAllBytes($pe, [byte[]](0x4D, 0x5A, 0x90, 0x00))
+        { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage '*renamed.txt*executable*'
+        Test-Path $pe | Should -BeTrue
+    }
+}
+
+Describe 'Set-LabIdaInstalled' {
+    It 'adds AddIda once and keeps the setup phases' {
+        $state = Join-Path $TestDrive 'state-ida.json'
+        '{"Completed":["Preflight","McpBridge"]}' | Set-Content $state
+        Set-LabIdaInstalled -Config @{ StatePath = $state }
+        Set-LabIdaInstalled -Config @{ StatePath = $state }
+        Get-LabState -Path $state | Should -Be @('Preflight', 'McpBridge', 'AddIda')
     }
 }

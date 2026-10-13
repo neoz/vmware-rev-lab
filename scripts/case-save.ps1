@@ -1,5 +1,5 @@
 #Requires -Version 7.2
-<# .SYNOPSIS Saves the guest's C:\lab\in\sample (sample + Ghidra databases) to cases/<case>/static/ghidra.zip. #>
+<# .SYNOPSIS Saves the guest's C:\lab\in\sample (sample + Ghidra and IDA databases) to cases/<case>/static/ghidra.zip. #>
 param([string]$Case)
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force

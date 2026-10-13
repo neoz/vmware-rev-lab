@@ -1,5 +1,5 @@
 #Requires -Version 7.2
-<# .SYNOPSIS Stages cases/<case> in the guest (saved Ghidra zip if any, else sample.zip) and marks it as the open case. #>
+<# .SYNOPSIS Stages cases/<case> in the guest (saved Ghidra/IDA zip if any, else sample.zip) and marks it as the open case. #>
 param([Parameter(Mandatory)][string]$Case, [string]$Sample)
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
