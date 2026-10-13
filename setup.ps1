@@ -22,6 +22,18 @@ if (-not $script:config.ContainsKey('GuestPassword')) {
     $script:config = Get-LabConfig
 }
 
+function Find-HostPython {
+    # `python` on PATH can be the Microsoft Store alias stub, which prints nothing; the py launcher
+    # also finds installs that were not added to PATH.
+    foreach ($cmd in @(@('py', '-3'), @('python'))) {
+        if (-not (Get-Command $cmd[0] -ErrorAction SilentlyContinue)) { continue }
+        $out = @(& $cmd[0] $cmd[1..9] -c "import sys; print(sys.executable); print('%d.%d' % sys.version_info[:2])" 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $out.Count -eq 2) {
+            return [pscustomobject]@{ Path = $out[0]; Version = [version]$out[1] }
+        }
+    }
+}
+
 function Invoke-PreflightPhase {
     $cfg = $script:config
     $problems = @()
@@ -39,11 +51,11 @@ function Invoke-PreflightPhase {
     $freeGB = [math]::Floor((Get-PSDrive -Name $drive).Free / 1GB)
     if ($freeGB -lt 120) { $problems += "Only $freeGB GB free on ${drive}:; 120 GB needed" }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { $problems += 'git not found on PATH' }
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        $pyVersion = [version](& python -c "import sys; print('%d.%d' % sys.version_info[:2])")
-        if ($pyVersion -lt [version]'3.10') { $problems += "Python $pyVersion found; 3.10 or newer is required" }
-    } else {
-        $problems += 'python not found on PATH'
+    $hostPython = Find-HostPython
+    if (-not $hostPython) {
+        $problems += 'Python not found (tried py -3 and python on PATH)'
+    } elseif ($hostPython.Version -lt [version]'3.10') {
+        $problems += "Python $($hostPython.Version) found at $($hostPython.Path); 3.10 or newer is required"
     }
     if ($problems) { throw "Preflight failed:`n - $($problems -join "`n - ")" }
     Assert-LabFreshVmSlot -Config $cfg
@@ -62,7 +74,9 @@ function Invoke-McpPhase {
     if ($LASTEXITCODE) { throw "git checkout $($cfg.VmwareMcpCommit) failed" }
     $python = Join-Path $dir '.venv/Scripts/python.exe'
     if (-not (Test-Path $python)) {
-        python -m venv (Join-Path $dir '.venv')
+        $hostPython = Find-HostPython
+        if (-not $hostPython) { throw 'Python not found (tried py -3 and python on PATH)' }
+        & $hostPython.Path -m venv (Join-Path $dir '.venv')
         if ($LASTEXITCODE) { throw 'python -m venv failed' }
     }
     # vmware-mcp declares mcp>=1.0.0 but uses the 1.x low-level Server API removed in mcp 2.x.
