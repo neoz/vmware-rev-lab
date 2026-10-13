@@ -17,24 +17,26 @@ $inputs = Get-LabIdaInputs -Config $config
 
 & (Join-Path $PSScriptRoot 'net.ps1') -Mode Setup
 Start-LabLog -Config $config -Name 'add-ida' | Out-Null
-New-LabGuestDirectory -Config $config -GuestPath 'C:\lab\tmp\ida'
-Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-pro_94_x64win.exe'
-Copy-LabToGuest -Config $config -HostPath $inputs.License -GuestPath 'C:\lab\tmp\ida\idapro.hexlic'
-if ($inputs.Data) {
-    # One zip keeps data/'s sub-folders; the guest expands it over C:\Tools\IDA.
-    $zip = Join-Path $config.LabDir 'ida-data.zip'
-    Compress-Archive -Path (Join-Path $inputs.DataDir '*') -DestinationPath $zip -Force
-    Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\tmp\ida\data.zip'
-    Remove-Item -Path $zip
+try {
+    New-LabGuestDirectory -Config $config -GuestPath 'C:\lab\tmp\ida'
+    Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-pro_94_x64win.exe'
+    Copy-LabToGuest -Config $config -HostPath $inputs.License -GuestPath 'C:\lab\tmp\ida\idapro.hexlic'
+    if ($inputs.Data) {
+        # One zip keeps data/'s sub-folders; the guest expands it over C:\Tools\IDA.
+        $zip = Join-Path $config.LabDir 'ida-data.zip'
+        Compress-Archive -Path (Join-Path $inputs.DataDir '*') -DestinationPath $zip -Force
+        Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\tmp\ida\data.zip'
+        Remove-Item -Path $zip
+    }
+    $r = Invoke-LabGuestScript -Config $config -Path (Join-Path $config.Root 'templates/guest/ida-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
+        IdaMcpVersion = $config.IdaMcpVersion; IdaPort = "$($config.McpIdaPort)"; User = $config.GuestUser
+    }
+    Write-LabLog $r.Output
+    if ($r.ExitCode -ne 0) { throw "ida-install.ps1 exited $($r.ExitCode)" }
+    Update-LabToolsIndex -Config $config
+} catch {
+    throw "IDA install failed ($($_.Exception.Message)); the guest is still on NAT. Fix it or run .\scripts\net.ps1 -Mode Analysis (without -UpdateSnapshot to discard)."
 }
-$r = Invoke-LabGuestScript -Config $config -Path (Join-Path $config.Root 'templates/guest/ida-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
-    IdaMcpVersion = $config.IdaMcpVersion; IdaPort = "$($config.McpIdaPort)"; User = $config.GuestUser
-}
-Write-LabLog $r.Output
-if ($r.ExitCode -ne 0) {
-    throw "IDA install failed; the guest is still on NAT. Fix it or run .\scripts\net.ps1 -Mode Analysis (without -UpdateSnapshot to discard)."
-}
-Update-LabToolsIndex -Config $config
 
 # net.ps1 -UpdateSnapshot does not wait for the relays; the clean snapshot must have revlab-ida running.
 & (Join-Path $PSScriptRoot 'net.ps1') -Mode Analysis

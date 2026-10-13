@@ -232,6 +232,8 @@ function Invoke-LabPhases {
     $completed = [System.Collections.Generic.List[string]]::new([string[]]@(Get-LabState -Path $StatePath))
     if ($From) {
         $rerun = $names[[array]::IndexOf($names, $From)..($names.Count - 1)]
+        # A recreated VM no longer has the IDA that add-ida.ps1 installed.
+        if ('CreateVm' -in $rerun) { $rerun += 'AddIda' }
         $completed.RemoveAll([Predicate[string]] { param($n) $n -in $rerun }) | Out-Null
         Set-LabState -Path $StatePath -Completed $completed
     }
@@ -925,7 +927,7 @@ function Get-LabIdaInputs {
     foreach ($path in $inputs.Installer, $inputs.License) {
         if (-not (Test-Path $path)) { throw "Missing $path; put the IDA Pro installer and license in tools/ida/." }
     }
-    if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse | ForEach-Object FullName) }
+    if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse -Force | ForEach-Object FullName) }
     foreach ($path in $inputs.Data) {
         $head = [byte[]]::new(2)
         $stream = [System.IO.File]::OpenRead($path)

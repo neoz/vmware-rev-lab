@@ -40,6 +40,15 @@ Describe 'Invoke-LabPhases' {
         (Get-Content $state -Raw | ConvertFrom-Json).Completed -join ',' | Should -Be 'A'
     }
 
+    It 'forgets AddIda when -From recreates the VM and keeps it otherwise' {
+        $phases = [ordered]@{ A = {}; CreateVm = {}; C = {} }
+        '{"Completed":["A","CreateVm","C","AddIda"]}' | Set-Content $state
+        Invoke-LabPhases -Phases $phases -StatePath $state -From C
+        Get-LabState -Path $state | Should -Contain 'AddIda'
+        Invoke-LabPhases -Phases $phases -StatePath $state -From CreateVm
+        Get-LabState -Path $state | Should -Not -Contain 'AddIda'
+    }
+
     It 'rejects an unknown -From phase' {
         { Invoke-LabPhases -Phases $phases -StatePath $state -From Nope } |
             Should -Throw -ExpectedMessage "*Unknown phase 'Nope'*"
