@@ -16,7 +16,7 @@ $toolsPath = 'C:\lab\tools.json'
 
 # Piping the output (Invoke-Native) makes PowerShell wait for the installer to exit.
 if (-not (Test-Path "$idaDir\ida.exe")) {
-    Assert-Native (Invoke-Native "$staging\ida-pro_94_x64win.exe" @('--mode', 'unattended', '--prefix', $idaDir)) 'IDA installer'
+    Assert-Native (Invoke-Native "$staging\ida-pro_94_x64win.exe" @('--mode', 'unattended', '--prefix', $idaDir, '--install_python', '0')) 'IDA installer'
     if (-not (Test-Path "$idaDir\ida.exe")) { throw "IDA installer exited but $idaDir\ida.exe is missing" }
 } else {
     Write-Output "IDA is already installed in $idaDir; installer skipped (uninstall it in the guest to install a newer one)."
