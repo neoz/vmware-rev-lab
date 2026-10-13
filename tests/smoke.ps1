@@ -95,6 +95,28 @@ Test-Step '7. Ghidra renames survive save_database, case-save and a revert' {
     if ($LASTEXITCODE -ne 0 -or $out -notmatch 'revlab_smoke_saved') { throw "rename lost after save and revert: $out" }
 }
 
+if ('AddIda' -in @(Get-LabState -Path $config.StatePath)) {
+    Test-Step '7a. revlab-ida lists notepad functions' {
+        $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+        $out = & $python -I $client $mcpJson revlab-ida ida-functions $path 'WinMain|wWinMain' 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'WinMain') { throw "no WinMain in: $out" }
+    }
+
+    Test-Step '7b. IDA renames survive save_database, case-save and a revert' {
+        $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+        $out = & $python -I $client $mcpJson revlab-ida ida-rename-save $path 'revlab_ida_saved' 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "rename/save failed: $out" }
+        if (-not (Test-LabGuestFile -Config $config -GuestPath "$path.i64")) { throw "no $path.i64 next to the sample" }
+        if (-not (Save-LabCase -Config $config)) { throw 'no open case to save' }
+        Restore-LabClean -Config $config
+        $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+        $out = & $python -I $client $mcpJson revlab-ida ida-list $path 'revlab_ida_saved' 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'revlab_ida_saved') { throw "rename lost after save and revert: $out" }
+    }
+} else {
+    Write-LabLog 'SKIP 7a/7b: IDA is not installed (the user runs scripts/add-ida.ps1)'
+}
+
 Test-Step '8. revlab-windbg attaches to a debug launch and runs lm' {
     & (Join-Path $root 'scripts/debug.ps1') -Case $notepadCase
     $out = & $python -I $client $mcpJson revlab-windbg windbg-lm 'npipe:server=.,pipe=revlab-dbg' 2>&1 | Out-String

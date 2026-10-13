@@ -18,6 +18,30 @@ def text(result):
     return "".join(c.text for c in result.content if getattr(c, "text", None))
 
 
+# ida-mcp has no list or rename tools; analysis runs as IDAPython through execute_python.
+IDA_LIST = """
+import re, ida_auto, ida_funcs, idautils
+ida_auto.auto_wait()
+print("\\n".join(n for n in map(ida_funcs.get_func_name, idautils.Functions()) if re.search(%s, n)))
+"""
+
+IDA_RENAME = """
+import ida_auto, ida_funcs, ida_name, idautils
+ida_auto.auto_wait()
+ea = next(ea for ea in idautils.Functions() if ida_funcs.get_func_name(ea).startswith("sub_"))
+if not ida_name.set_name(ea, %s):
+    raise RuntimeError("set_name failed")
+print(hex(ea))
+"""
+
+
+async def ida_call(session, tool, arguments):
+    result = await session.call_tool(tool, arguments)
+    if result.isError:
+        raise SystemExit(f"{tool} failed: {text(result)}")
+    return text(result)
+
+
 async def run(mcp_json, name, check, args):
     async with stdio_client(server_params(mcp_json, name)) as (r, w):
         async with ClientSession(r, w) as s:
@@ -43,6 +67,14 @@ async def run(mcp_json, name, check, args):
                 db = json.loads(text(await s.call_tool("open_database", {"file_path": args[0]})))["database"]
                 await s.call_tool("wait_for_analysis", {"database": db})
                 print(text(await s.call_tool("list_functions", {"database": db, "filter_pattern": args[1], "limit": 20})))
+            elif check in ("ida-functions", "ida-list"):
+                await ida_call(s, "open_database", {"path": args[0]})
+                print(await ida_call(s, "execute_python", {"code": IDA_LIST % json.dumps(args[1])}))
+            elif check == "ida-rename-save":
+                # Renames the first sub_ function to args[1] and saves, as an analyst would before case-save.
+                await ida_call(s, "open_database", {"path": args[0]})
+                print(await ida_call(s, "execute_python", {"code": IDA_RENAME % json.dumps(args[1])}))
+                print(await ida_call(s, "save_database", {}))
             elif check == "windbg-lm":
                 opened = text(await s.call_tool("open_cdb_remote", {"connection_string": args[0]}))
                 # mcp-windbg answers in text: first line "session_id: cdb-xxxxxxxx".
