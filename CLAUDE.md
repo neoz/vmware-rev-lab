@@ -121,3 +121,5 @@ Suggest one when a sample needs it:
 - Start host processes through `Invoke-LabProcess`: it clears the inherit flag on
   the script's own stdout/stderr so a long-lived grandchild (vmware.exe from
   `vmrun start gui`) cannot keep the caller's pipe open and hang the script.
+  It restores the flag right after the start, because a script run as
+  `.\scripts\x.ps1` shares the interactive shell's handles.

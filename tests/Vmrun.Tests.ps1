@@ -35,6 +35,22 @@ Describe 'Invoke-LabProcess' {
         $closed | Should -BeTrue -Because "stdout stayed open for $([int]$watch.Elapsed.TotalSeconds) s"
         $read.Result | Should -Match 'done'
     }
+
+    It 'leaves the caller''s stdout inheritable for later children' {
+        # Dot-sourcing a script (`.\scripts\reset.ps1`) runs it in the interactive shell;
+        # programs started from that shell afterwards must still get its stdout.
+        $module = (Resolve-Path "$PSScriptRoot/../scripts/lib/LabCommon.psm1").Path
+        $inner = "Import-Module '$module' -Force; " +
+            "[void](Invoke-LabProcess -FilePath 'cmd.exe' -ArgumentList @('/c', 'exit 0')); cmd.exe /c echo after"
+        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        foreach ($arg in @('-NoProfile', '-NonInteractive', '-Command', $inner)) { $psi.ArgumentList.Add($arg) }
+        $psi.RedirectStandardOutput = $true
+        $psi.UseShellExecute = $false
+        $outer = [System.Diagnostics.Process]::Start($psi)
+        $out = $outer.StandardOutput.ReadToEnd()
+        $outer.WaitForExit()
+        $out | Should -Match 'after'
+    }
 }
 
 Describe 'Invoke-Vmrun' {

@@ -78,21 +78,31 @@ function Disable-LabStdHandleInheritance {
     # process visible to the child, including the stdout/stderr pipes our own caller reads.
     # A long-lived grandchild (vmware.exe from `vmrun start gui`) would then keep the
     # caller's pipe open after the script has finished. Children get their own pipes, so
-    # ours never need to be inherited.
+    # ours never need to be inherited. Returns the previous flags for Restore-LabStdHandleInheritance:
+    # when a script runs inside the interactive shell, that shell's later children need them.
     if (-not $IsWindows) { return }
     if (-not ('LabCommon.StdHandles' -as [type])) {
         Add-Type -Namespace LabCommon -Name StdHandles -MemberDefinition @'
 [DllImport("kernel32.dll", SetLastError = true)] public static extern System.IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetHandleInformation(System.IntPtr hObject, out uint lpdwFlags);
 [DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetHandleInformation(System.IntPtr hObject, uint dwMask, uint dwFlags);
 '@
     }
     foreach ($id in -11, -12) {
         # STD_OUTPUT_HANDLE, STD_ERROR_HANDLE; HANDLE_FLAG_INHERIT = 1.
         $handle = [LabCommon.StdHandles]::GetStdHandle($id)
-        if ($handle -ne [IntPtr]::Zero -and $handle -ne [IntPtr]::new(-1)) {
+        $flags = [uint32]0
+        if ($handle -ne [IntPtr]::Zero -and $handle -ne [IntPtr]::new(-1) -and
+            [LabCommon.StdHandles]::GetHandleInformation($handle, [ref]$flags)) {
             [void][LabCommon.StdHandles]::SetHandleInformation($handle, 1, 0)
+            [pscustomobject]@{ Handle = $handle; Flags = $flags }
         }
     }
+}
+
+function Restore-LabStdHandleInheritance {
+    param([object[]]$Saved)
+    foreach ($s in $Saved) { [void][LabCommon.StdHandles]::SetHandleInformation($s.Handle, 1, $s.Flags -band 1) }
 }
 
 function Invoke-LabProcess {
@@ -101,14 +111,19 @@ function Invoke-LabProcess {
         [string[]]$ArgumentList = @(),
         [int]$TimeoutSec = 300
     )
-    Disable-LabStdHandleInheritance
     $psi = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
     foreach ($arg in $ArgumentList) { $psi.ArgumentList.Add($arg) }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
-    $process = [System.Diagnostics.Process]::Start($psi)
+    # Handles are inherited only at creation time, so the flags can come back right after.
+    $saved = @(Disable-LabStdHandleInheritance)
+    try {
+        $process = [System.Diagnostics.Process]::Start($psi)
+    } finally {
+        Restore-LabStdHandleInheritance -Saved $saved
+    }
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit($TimeoutSec * 1000)) {
