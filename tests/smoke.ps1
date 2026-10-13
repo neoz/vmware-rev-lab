@@ -98,8 +98,9 @@ Test-Step '7. Ghidra renames survive save_database, case-save and a revert' {
 if ('AddIda' -in @(Get-LabState -Path $config.StatePath)) {
     Test-Step '7a. revlab-ida lists notepad functions' {
         $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
-        $out = & $python -I $client $mcpJson revlab-ida ida-functions $path 'WinMain|wWinMain' 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'WinMain') { throw "no WinMain in: $out" }
+        # The guest has no symbol server, so IDA names no WinMain; it always names the PE entry point 'start'.
+        $out = & $python -I $client $mcpJson revlab-ida ida-functions $path '^start$' 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch '\bstart\b') { throw "no start in: $out" }
     }
 
     Test-Step '7b. IDA renames survive save_database, case-save and a revert' {
