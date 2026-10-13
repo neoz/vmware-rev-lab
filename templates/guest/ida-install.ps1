@@ -28,7 +28,10 @@ Remove-Item -Path $staging -Recurse -Force
 
 $python = "$mcp\venv-ida\Scripts\python.exe"
 if (-not (Test-Path $python)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-ida")) 'venv venv-ida' }
-Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$IdaMcpVersion", "$idaDir\idalib\python")) 'pip ida-mcp idapro'
+# IDA ships the idalib bindings as a wheel (idapro-<ver>-py3-none-any.whl) under idalib\python.
+$idaproWheel = Get-ChildItem -Path "$idaDir\idalib\python" -Filter 'idapro-*.whl' | Select-Object -First 1
+if (-not $idaproWheel) { throw "No idapro wheel in $idaDir\idalib\python" }
+Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$IdaMcpVersion", $idaproWheel.FullName)) 'pip ida-mcp idapro'
 Assert-Native (Invoke-Native $python @("$idaDir\idalib\python\py-activate-idalib.py", '-d', $idaDir)) 'activate idalib'
 # Loading idalib checks the license, so a bad license fails here instead of in Claude's first open_database.
 Assert-Native (Invoke-Native $python @('-c', 'import idapro')) 'import idapro'
