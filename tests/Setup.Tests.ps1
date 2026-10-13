@@ -191,15 +191,7 @@ Describe 'Get-LabIdaInputs' {
         'x' | Set-Content (Join-Path $root "tools/ida/$Present")
         { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage "*$Missing*"
     }
-
-    It 'refuses an executable under data/ and leaves it in place' {
-        foreach ($name in 'ida-pro_94_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
-        New-Item -ItemType Directory -Force -Path (Join-Path $root 'tools/ida/data/sub') | Out-Null
-        $pe = Join-Path $root 'tools/ida/data/sub/renamed.txt'
-        [System.IO.File]::WriteAllBytes($pe, [byte[]](0x4D, 0x5A, 0x90, 0x00))
-        { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage '*renamed.txt*executable*'
-        Test-Path $pe | Should -BeTrue
-    }}
+}
 
 Describe 'Set-LabIdaInstalled' {
     It 'adds AddIda once and keeps the setup phases' {

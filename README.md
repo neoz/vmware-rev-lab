@@ -93,7 +93,7 @@ the changes with `pwsh -File scripts/net.ps1 -Mode Analysis`.
 
 Put `ida-pro_94_x64win.exe` and your `idapro.hexlic` in `tools/ida/` (ignored by
 git). Files under `tools/ida/data/` (for example `IDA-MCP.md`) are copied next
-to `ida.exe`; executables are refused there. Then run:
+to `ida.exe`. Then run:
 
 ```powershell
 pwsh -File scripts/add-ida.ps1

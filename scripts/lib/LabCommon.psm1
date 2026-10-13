@@ -917,7 +917,6 @@ function Test-LabMcpBridge {
 
 function Get-LabIdaInputs {
     # The host files add-ida.ps1 copies into the guest; checked before the guest goes on NAT.
-    # Files under tools/ida/data go over the IDA install, so executables are refused there.
     param([Parameter(Mandatory)][hashtable]$Config)
     $dir = Join-Path $Config.Root 'tools/ida'
     $inputs = [ordered]@{
@@ -930,14 +929,6 @@ function Get-LabIdaInputs {
         if (-not (Test-Path $path)) { throw "Missing $path; put the IDA Pro installer and license in tools/ida/." }
     }
     if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse | ForEach-Object FullName) }
-    foreach ($path in $inputs.Data) {
-        $head = [byte[]]::new(2)
-        $stream = [System.IO.File]::OpenRead($path)
-        try { $read = $stream.Read($head, 0, 2) } finally { $stream.Dispose() }
-        if ($read -eq 2 -and $head[0] -eq 0x4D -and $head[1] -eq 0x5A) {
-            throw "$path is an executable (MZ header); tools/ida/data may only hold non-executable files."
-        }
-    }
     $inputs
 }
 

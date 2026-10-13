@@ -4,7 +4,7 @@
     Installs IDA Pro and ida-mcp (MCP server revlab-ida) into the clean snapshot.
 .DESCRIPTION
     Needs tools/ida/ida-pro_94_x64win.exe and tools/ida/idapro.hexlic on the host; files under tools/ida/data
-    (no executables) are copied next to ida.exe. Reverts to clean, switches the guest to NAT, installs IDA and
+    are copied next to ida.exe. Reverts to clean, switches the guest to NAT, installs IDA and
     ida-mcp, switches back to the isolated network and retakes the clean snapshot once all three MCP relays run.
     Only a human runs this: it gives the guest Internet.
 .EXAMPLE

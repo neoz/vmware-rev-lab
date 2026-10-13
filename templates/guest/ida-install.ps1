@@ -22,7 +22,7 @@ if (-not (Test-Path "$idaDir\ida.exe")) {
     Write-Output "IDA is already installed in $idaDir; installer skipped (uninstall it in the guest to install a newer one)."
 }
 Copy-Item -Path "$staging\idapro.hexlic" -Destination $idaDir -Force
-# The host's tools/ida/data goes next to ida.exe; add-ida.ps1 has already refused executables in it.
+# The host's tools/ida/data goes next to ida.exe.
 if (Test-Path "$staging\data.zip") { Expand-Archive -Path "$staging\data.zip" -DestinationPath $idaDir -Force }
 Remove-Item -Path $staging -Recurse -Force
 
