@@ -7,9 +7,11 @@ PowerShell scripts and three MCP servers:
 
 - `vmware-mcp`: power, snapshots, guest files and processes, screenshots.
 - `revlab-ghidra`: Ghidra 12 (re-mcp) running in the guest.
+- `revlab-ida`: IDA Pro 9.4 (ida-mcp on idalib) running in the guest, once
+  `scripts/add-ida.ps1` has been run.
 - `revlab-windbg`: WinDbg `cdb` (mcp-windbg) running in the guest.
 
-The Ghidra and WinDbg servers reach the host over VMCI vSockets, so the guest
+The IDA, Ghidra and WinDbg servers reach the host over VMCI vSockets, so the guest
 never needs a network path to the host.
 
 ## Requirements
@@ -87,6 +89,21 @@ Useful packages by sample type:
 If an install fails, the guest is left on NAT. Fix it and rerun, or discard
 the changes with `pwsh -File scripts/net.ps1 -Mode Analysis`.
 
+### Adding IDA Pro
+
+Put `ida-pro_94_x64win.exe` and your `idapro.hexlic` in `tools/ida/` (ignored by
+git). Files under `tools/ida/data/` (for example `IDA-MCP.md`) are copied next
+to `ida.exe`; executables are refused there. Then run:
+
+```powershell
+pwsh -File scripts/add-ida.ps1
+```
+
+It installs IDA Pro into `C:\Tools\IDA` and `ida-mcp` into its own venv,
+registers the `revlab-ida` relay, retakes the clean snapshot with all three
+relays running and adds `revlab-ida` to `.mcp.json`. Reconnect it in `/mcp`.
+Like `add-tool.ps1`, it gives the guest Internet, so only a person runs it.
+
 ## Basic usage
 
 ### Start a session
@@ -117,7 +134,7 @@ and `-`. Never extract or run the sample on the host.
 cases/<case>/
   sample.zip      # the sample, zipped with password "infected"
   notes.md        # your findings
-  static/         # saved Ghidra work (ghidra.zip)
+  static/         # saved Ghidra and IDA work (ghidra.zip)
   fetched/        # files brought back from the guest
   runs/<ts>/      # detonation results
 ```
@@ -173,7 +190,7 @@ pwsh -File scripts/reset.ps1                                           # save th
 
 - Samples stay zipped on the host; they are only extracted and run in the guest.
 - The analysis network is isolated. Only a person switches it to Internet
-  (`scripts/net.ps1 -Mode Setup`, `scripts/add-tool.ps1`).
+  (`scripts/net.ps1 -Mode Setup`, `scripts/add-tool.ps1`, `scripts/add-ida.ps1`).
 - Never contact a sample's URLs, domains or IPs from the host.
 - Revert to the clean snapshot before each new case.
 - `.claude/settings.json` denies the `vmware-mcp` tools that change the VM's

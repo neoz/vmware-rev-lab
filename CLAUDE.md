@@ -53,7 +53,8 @@ projects, zipped) before reverting.
 | Role | Tool | Use |
 |---|---|---|
 | Triage | `Diec`, `Capa`, `Floss` | packer/compiler, capabilities + ATT&CK, decoded strings (all with JSON output) |
-| Static (main) | Ghidra 12 via `revlab-ghidra` MCP (`AnalyzeHeadless` for batch scripts) | open, analyze, decompile, xrefs, rename, comment |
+| Static (main) | IDA Pro 9.4 via `revlab-ida` MCP (idalib; after the user ran `add-ida.ps1`) | `open_database`, then IDAPython through `execute_python`: decompile, xrefs, rename, comment |
+| Static (fallback) | Ghidra 12 via `revlab-ghidra` MCP (`AnalyzeHeadless` for batch scripts) | open, analyze, decompile, xrefs, rename, comment |
 | .NET | `Ilspycmd`, `De4dot` | decompile to C#, deobfuscate |
 | Debugger (main) | WinDbg `cdb` via `revlab-windbg` MCP | live debugging after `debug.ps1` / `detonate.ps1 -UnderDebugger` |
 | Dynamic (main) | `Frida`, `FridaTrace` | hook APIs with JS scripts, dump buffers and decrypted config |
@@ -61,10 +62,12 @@ projects, zipped) before reverting.
 | Memory | `PeSieve`, `HollowsHunter` | dump unpacked / injected PEs |
 | Other | `SevenZip`, `upx`, `py -3.13` (pefile, yara-python), oledump/pdfid | archives, UPX, own scripts, maldocs |
 
-## Ghidra and WinDbg over MCP
+## IDA, Ghidra and WinDbg over MCP
 
-`revlab-ghidra` (re-mcp, Ghidra 12) and `revlab-windbg` (mcp-windbg, cdb) run
-inside the guest and reach Claude through VMCI vSockets; the VM must be running.
+`revlab-ida` (ida-mcp, IDA Pro 9.4 idalib), `revlab-ghidra` (re-mcp, Ghidra 12) and
+`revlab-windbg` (mcp-windbg, cdb) run inside the guest and reach Claude through VMCI
+vSockets; the VM must be running. `revlab-ida` exists only after the user ran
+`scripts/add-ida.ps1`.
 
 - Static: `pwsh -File scripts/case-open.ps1 -Case <c>` stages the sample (and any
   saved Ghidra databases) under `C:\lab\in\sample\`; then `open_database`,
@@ -74,6 +77,10 @@ inside the guest and reach Claude through VMCI vSockets; the VM must be running.
   `collect.ps1` save the open case before reverting. They only pack what is
   on disk: call `save_database` for every database you changed first
   (renames, comments and types are lost otherwise).
+- IDA: after `case-open.ps1`, `open_database` with the staged sample path, then
+  `execute_python` (IDAPython / ida-domain; `reference` looks up the API).
+  IDA writes `<sample>.i64` next to the sample, so `case-save.ps1` packs it into
+  `ghidra.zip` with the Ghidra databases. Call `save_database` before any revert.
 - Debug: `pwsh -File scripts/debug.ps1 -Case <c>` (bare) or
   `pwsh -File scripts/detonate.ps1 -Case <c> -UnderDebugger` (with monitors) leave the
   sample stopped under `cdb -server`; attach with `revlab-windbg`
@@ -86,6 +93,8 @@ inside the guest and reach Claude through VMCI vSockets; the VM must be running.
 
 Packages outside the lean set are installed by the user, never by Claude,
 because it gives the guest Internet: `pwsh -File scripts/add-tool.ps1 -Package <name>.vm[, ...]`.
+IDA Pro is installed the same way by the user, from the installer and license in
+`tools/ida/`: `pwsh -File scripts/add-ida.ps1`.
 Suggest one when a sample needs it:
 
 | Sample | Package |
