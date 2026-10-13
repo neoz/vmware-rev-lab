@@ -30,15 +30,20 @@ Describe 'Snapshots' {
         $global:SnapOps = [System.Collections.Generic.List[string]]::new()
         $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean'; Root = $TestDrive }
         Mock Save-LabLocalConfig -ModuleName LabCommon {}
+        Mock Invoke-LabGuestScript -ModuleName LabCommon {
+            $global:SnapOps.Add("guest $([System.IO.Path]::GetFileName($Path))")
+            [pscustomobject]@{ ExitCode = 0; Output = '' }
+        }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = "Total snapshots: 1`nclean"; GuestExitCode = 0 } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -in 'deleteSnapshot', 'snapshot' } {
             $global:SnapOps.Add("$Command $($Arguments[0])")
             [pscustomobject]@{ Output = ''; GuestExitCode = 0 }
         }
         Update-LabSnapshot -Config $c
-        $global:SnapOps.Count | Should -Be 2
-        $global:SnapOps[0] | Should -Match '^snapshot clean-\d{14}$'
-        $global:SnapOps[1] | Should -Be 'deleteSnapshot clean'
+        $global:SnapOps.Count | Should -Be 3
+        $global:SnapOps[0] | Should -Be 'guest clear-workdirs.ps1'
+        $global:SnapOps[1] | Should -Match '^snapshot clean-\d{14}$'
+        $global:SnapOps[2] | Should -Be 'deleteSnapshot clean'
         $c.SnapshotName | Should -Match '^clean-\d{14}$'
         Should -Invoke Save-LabLocalConfig -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Values.SnapshotName -eq $c.SnapshotName }
     }
@@ -46,12 +51,22 @@ Describe 'Snapshots' {
     It 'keeps the old snapshot when taking the new one fails' {
         $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean-20260101000000'; Root = $TestDrive }
         Mock Save-LabLocalConfig -ModuleName LabCommon {}
+        Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 0; Output = '' } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = "Total snapshots: 1`nclean-20260101000000"; GuestExitCode = 0 } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'snapshot' } { throw 'disk full' }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'deleteSnapshot' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
         { Update-LabSnapshot -Config $c } | Should -Throw -ExpectedMessage '*disk full*'
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'deleteSnapshot' }
         $c.SnapshotName | Should -Be 'clean-20260101000000'
+    }
+
+    It 'takes no snapshot when the guest working folders cannot be cleared' {
+        $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean'; Root = $TestDrive }
+        Mock Invoke-LabGuestScript -ModuleName LabCommon { [pscustomobject]@{ ExitCode = 1; Output = 'access denied' } }
+        Mock Invoke-Vmrun -ModuleName LabCommon {}
+        { Update-LabSnapshot -Config $c } | Should -Throw -ExpectedMessage '*clear-workdirs*access denied*'
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly
+        $c.SnapshotName | Should -Be 'clean'
     }
 }
 

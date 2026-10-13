@@ -616,6 +616,9 @@ function Update-LabSnapshot {
     # vmrun cannot rename snapshots, so take a new timestamped one first and delete the old one only after
     # that succeeded; a failure never leaves the lab without a clean snapshot.
     param([Parameter(Mandatory)][hashtable]$Config)
+    # Setup phases can run on a guest that still holds a case (e.g. after the smoke test); never bake it in.
+    $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/clear-workdirs.ps1')
+    if ($r.ExitCode -ne 0) { throw "clear-workdirs.ps1 failed: $($r.Output)" }
     $old = $Config.SnapshotName
     $new = '{0}-{1:yyyyMMddHHmmss}' -f ($old -replace '-\d{14}$', ''), (Get-Date)
     Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($new) -TimeoutSec 1800 | Out-Null
