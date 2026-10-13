@@ -729,7 +729,7 @@ function New-LabMcpJson {
         'revlab-windbg' = & $bridgeServer $Config.McpWindbgPort 'RevlabMcpWindbg'
     }
     # revlab-ida exists only after the user ran add-ida.ps1, which records AddIda in the state.
-    if ($Config.ContainsKey('StatePath') -and 'AddIda' -in @(Get-LabState -Path $Config.StatePath)) {
+    if (Test-LabIdaInstalled -Config $Config) {
         $servers['revlab-ida'] = & $bridgeServer $Config.McpIdaPort 'RevlabMcpIda'
     }
     [ordered]@{ mcpServers = $servers } | ConvertTo-Json -Depth 5
@@ -895,7 +895,9 @@ function Update-LabToolsIndex {
 }
 
 function Test-LabRelaysRunning {
-    param([Parameter(Mandatory)][hashtable]$Config, [int]$Count = 2)
+    param([Parameter(Mandatory)][hashtable]$Config, [int]$Count)
+    # One relay each for Ghidra and WinDbg, plus IDA once add-ida.ps1 has run.
+    if (-not $PSBoundParameters.ContainsKey('Count')) { $Count = if (Test-LabIdaInstalled -Config $Config) { 3 } else { 2 } }
     try {
         $out = (Invoke-Vmrun -Config $Config -Command listProcessesInGuest -Guest -RetryCount 0).Output
     } catch { return $false }
@@ -937,6 +939,11 @@ function Get-LabIdaInputs {
         }
     }
     $inputs
+}
+
+function Test-LabIdaInstalled {
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $Config.ContainsKey('StatePath') -and 'AddIda' -in @(Get-LabState -Path $Config.StatePath)
 }
 
 function Set-LabIdaInstalled {

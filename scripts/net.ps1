@@ -18,7 +18,7 @@ $config = Get-LabConfig
 Start-LabLog -Config $config -Name "net-$Mode" | Out-Null
 
 if ($Mode -eq 'Setup') {
-    Restore-LabClean -Config $config
+    Restore-LabClean -Config $config -SaveCase
     Stop-LabVm -Config $config
     Set-LabVmxNetwork -Config $config -Mode Setup
     Start-LabVm -Config $config

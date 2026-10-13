@@ -70,7 +70,7 @@ vSockets; the VM must be running. `revlab-ida` exists only after the user ran
 `scripts/add-ida.ps1`.
 
 - Static: `pwsh -File scripts/case-open.ps1 -Case <c>` stages the sample (and any
-  saved Ghidra databases) under `C:\lab\in\sample\`; then `open_database`,
+  saved Ghidra and IDA databases) under `C:\lab\in\sample\`; then `open_database`,
   `wait_for_analysis`, `list_functions`, `decompile_function`, renames and
   comments through `revlab-ghidra`. `case-save.ps1` stores the work in
   `cases/<c>/static/ghidra.zip`; `reset.ps1`, `detonate.ps1` and

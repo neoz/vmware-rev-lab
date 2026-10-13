@@ -203,6 +203,15 @@ Describe 'Test-LabRelaysRunning' {
         }
         Test-LabRelaysRunning -Config $cfg -Count 3 | Should -BeTrue
     }
+
+    It 'waits for the IDA relay by default once AddIda is recorded' {
+        $state = Join-Path $TestDrive 'relay-ida-state.json'
+        '{"Completed":["McpBridge","AddIda"]}' | Set-Content $state
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ GuestExitCode = 0; Output = "pid=1, owner=x, cmd=pythonw.exe`npid=2, owner=x, cmd=pythonw.exe" }
+        }
+        Test-LabRelaysRunning -Config ($cfg + @{ StatePath = $state }) | Should -BeFalse
+    }
 }
 
 Describe 'Get-LabSessionNotice' {

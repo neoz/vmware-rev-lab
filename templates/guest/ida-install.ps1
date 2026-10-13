@@ -18,6 +18,8 @@ $toolsPath = 'C:\lab\tools.json'
 if (-not (Test-Path "$idaDir\ida.exe")) {
     Assert-Native (Invoke-Native "$staging\ida-pro_94_x64win.exe" @('--mode', 'unattended', '--prefix', $idaDir)) 'IDA installer'
     if (-not (Test-Path "$idaDir\ida.exe")) { throw "IDA installer exited but $idaDir\ida.exe is missing" }
+} else {
+    Write-Output "IDA is already installed in $idaDir; installer skipped (uninstall it in the guest to install a newer one)."
 }
 Copy-Item -Path "$staging\idapro.hexlic" -Destination $idaDir -Force
 # The host's tools/ida/data goes next to ida.exe; add-ida.ps1 has already refused executables in it.

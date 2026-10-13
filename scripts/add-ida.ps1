@@ -40,6 +40,8 @@ try {
 
 # net.ps1 -UpdateSnapshot does not wait for the relays; the clean snapshot must have revlab-ida running.
 & (Join-Path $PSScriptRoot 'net.ps1') -Mode Analysis
+# net.ps1 started its own log; keep the rest of the install in an add-ida log.
+Start-LabLog -Config $config -Name 'add-ida' | Out-Null
 Restart-LabGuest -Config $config
 Wait-LabDesktop -Config $config
 Wait-LabCondition -Description 'MCP relays running' -TimeoutSec 300 -PollSec 10 -Condition { Test-LabRelaysRunning -Config $config -Count 3 }
