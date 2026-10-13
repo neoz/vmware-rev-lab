@@ -16,6 +16,13 @@ Describe 'Invoke-LabProcess' {
         $err.Exception.Message | Should -Not -Match 'S3cretArg'
     }
 
+    It 'logs a heartbeat while a labelled command runs' {
+        Mock Write-LabLog -ModuleName LabCommon {}
+        $r = Invoke-LabProcess -FilePath 'ping.exe' -ArgumentList @('-n', '4', '127.0.0.1') -ProgressLabel 'snapshot x' -ProgressSec 1
+        $r.ExitCode | Should -Be 0
+        Should -Invoke Write-LabLog -ModuleName LabCommon -ParameterFilter { $Message -match 'snapshot x: still running \(0m0\ds\)' }
+    }
+
     It 'does not let a long-lived grandchild hold the caller''s stdout open' {
         # Mirrors `vmrun start gui`: the child exits but leaves vmware.exe running. When the
         # caller captures our stdout (as Claude Code does), that pipe must still close.

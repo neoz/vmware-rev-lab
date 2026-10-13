@@ -109,7 +109,10 @@ function Invoke-LabProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$ArgumentList = @(),
-        [int]$TimeoutSec = 300
+        [int]$TimeoutSec = 300,
+        # When set, logs a heartbeat every ProgressSec seconds so a long silent command does not look hung.
+        [string]$ProgressLabel,
+        [int]$ProgressSec = 30
     )
     $psi = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
     foreach ($arg in $ArgumentList) { $psi.ArgumentList.Add($arg) }
@@ -126,10 +129,16 @@ function Invoke-LabProcess {
     }
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($TimeoutSec * 1000)) {
-        $process.Kill($true)
-        # Arguments may carry the guest password; callers add a masked command line.
-        throw "Timed out after $TimeoutSec s: $FilePath"
+    $step = if ($ProgressLabel) { $ProgressSec } else { $TimeoutSec }
+    $elapsed = 0
+    while (-not $process.WaitForExit([Math]::Min($step, $TimeoutSec - $elapsed) * 1000)) {
+        $elapsed = [Math]::Min($elapsed + $step, $TimeoutSec)
+        if ($elapsed -ge $TimeoutSec) {
+            $process.Kill($true)
+            # Arguments may carry the guest password; callers add a masked command line.
+            throw "Timed out after $TimeoutSec s: $FilePath"
+        }
+        Write-LabLog ('  ... {0}: still running ({1}m{2:00}s)' -f $ProgressLabel, [Math]::Floor($elapsed / 60), ($elapsed % 60))
     }
     $process.WaitForExit()
     # Children such as vmware.exe (from `vmrun start gui`) inherit the pipes and keep them open.
@@ -157,7 +166,8 @@ function Invoke-Vmrun {
         [switch]$NoVmx,
         [int]$TimeoutSec = 300,
         [int]$RetryCount = 5,
-        [int]$RetryDelaySec = 15
+        [int]$RetryDelaySec = 15,
+        [string]$ProgressLabel
     )
     $argv = @('-T', 'ws')
     if ($Guest) { $argv += @('-gu', $Config.GuestUser, '-gp', $Config.GuestPassword) }
@@ -171,7 +181,7 @@ function Invoke-Vmrun {
     for ($attempt = 1; ; $attempt++) {
         Write-LabLog "vmrun $display" -Quiet
         try {
-            $result = Invoke-LabProcess -FilePath $Config.Vmrun -ArgumentList $argv -TimeoutSec $TimeoutSec
+            $result = Invoke-LabProcess -FilePath $Config.Vmrun -ArgumentList $argv -TimeoutSec $TimeoutSec -ProgressLabel $ProgressLabel
         } catch {
             throw "vmrun $display failed: $($_.Exception.Message)"
         }
@@ -449,6 +459,7 @@ function Test-LabVmRunning {
 function Start-LabVm {
     param([Parameter(Mandatory)][hashtable]$Config)
     if (-not (Test-LabVmRunning -Config $Config)) {
+        Write-LabLog 'Starting the VM'
         Invoke-Vmrun -Config $Config -Command start -Arguments @('gui') | Out-Null
     }
 }
@@ -475,7 +486,8 @@ function Get-LabSessionNotice {
 function Stop-LabVm {
     param([Parameter(Mandatory)][hashtable]$Config)
     if (Test-LabVmRunning -Config $Config) {
-        Invoke-Vmrun -Config $Config -Command stop -Arguments @('soft') -TimeoutSec 600 | Out-Null
+        Write-LabLog 'Shutting down the VM'
+        Invoke-Vmrun -Config $Config -Command stop -Arguments @('soft') -TimeoutSec 600 -ProgressLabel 'shutdown' | Out-Null
     }
     Wait-LabCondition -Description 'VM power off' -TimeoutSec 300 -Condition { -not (Test-LabVmRunning -Config $Config) }
 }
@@ -486,6 +498,7 @@ function Wait-LabTools {
         [int]$TimeoutSec = 600,
         [int]$PollSec = 10
     )
+    Write-LabLog 'Waiting for VMware Tools in the guest'
     Wait-LabCondition -Description 'VMware Tools running' -TimeoutSec $TimeoutSec -PollSec $PollSec -Condition {
         try { (Invoke-Vmrun -Config $Config -Command checkToolsState -RetryCount 0).Output -match 'running' } catch { $false }
     }
@@ -616,6 +629,7 @@ function Restart-LabGuest {
 
 function Wait-LabDesktop {
     param([Parameter(Mandatory)][hashtable]$Config)
+    Write-LabLog 'Waiting for the guest desktop'
     Wait-LabCondition -Description 'user desktop (explorer.exe)' -TimeoutSec 600 -PollSec 10 -Condition {
         try { (Invoke-Vmrun -Config $Config -Command listProcessesInGuest -Guest -RetryCount 0).Output -match 'explorer\.exe' } catch { $false }
     }
@@ -632,15 +646,18 @@ function Update-LabSnapshot {
     # that succeeded; a failure never leaves the lab without a clean snapshot.
     param([Parameter(Mandatory)][hashtable]$Config)
     # Setup phases can run on a guest that still holds a case (e.g. after the smoke test); never bake it in.
+    Write-LabLog 'Clearing guest working folders before the snapshot'
     $r = Invoke-LabGuestScript -Config $Config -Path (Join-Path $Config.Root 'templates/guest/clear-workdirs.ps1')
     if ($r.ExitCode -ne 0) { throw "clear-workdirs.ps1 failed: $($r.Output)" }
     $old = $Config.SnapshotName
     $new = '{0}-{1:yyyyMMddHHmmss}' -f ($old -replace '-\d{14}$', ''), (Get-Date)
-    Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($new) -TimeoutSec 1800 | Out-Null
+    Write-LabLog "Taking snapshot '$new' (a running VM can take several minutes)"
+    Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($new) -TimeoutSec 1800 -ProgressLabel "snapshot '$new'" | Out-Null
     Save-LabLocalConfig -Root $Config.Root -Values @{ SnapshotName = $new }
     $Config.SnapshotName = $new
     if ($old -in (Get-LabSnapshots -Config $Config)) {
-        Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($old) -TimeoutSec 1800 | Out-Null
+        Write-LabLog "Deleting old snapshot '$old' (VMware merges its disk; can take several minutes)"
+        Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($old) -TimeoutSec 1800 -ProgressLabel "delete snapshot '$old'" | Out-Null
     }
     Write-LabLog "Snapshot '$new' taken (replaces '$old')"
 }
