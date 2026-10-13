@@ -73,12 +73,35 @@ function Write-LabLog {
     if (-not $Quiet) { Write-Host $line }
 }
 
+function Disable-LabStdHandleInheritance {
+    # Process.Start with UseShellExecute = $false makes every inheritable handle of this
+    # process visible to the child, including the stdout/stderr pipes our own caller reads.
+    # A long-lived grandchild (vmware.exe from `vmrun start gui`) would then keep the
+    # caller's pipe open after the script has finished. Children get their own pipes, so
+    # ours never need to be inherited.
+    if (-not $IsWindows) { return }
+    if (-not ('LabCommon.StdHandles' -as [type])) {
+        Add-Type -Namespace LabCommon -Name StdHandles -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)] public static extern System.IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetHandleInformation(System.IntPtr hObject, uint dwMask, uint dwFlags);
+'@
+    }
+    foreach ($id in -11, -12) {
+        # STD_OUTPUT_HANDLE, STD_ERROR_HANDLE; HANDLE_FLAG_INHERIT = 1.
+        $handle = [LabCommon.StdHandles]::GetStdHandle($id)
+        if ($handle -ne [IntPtr]::Zero -and $handle -ne [IntPtr]::new(-1)) {
+            [void][LabCommon.StdHandles]::SetHandleInformation($handle, 1, 0)
+        }
+    }
+}
+
 function Invoke-LabProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$ArgumentList = @(),
         [int]$TimeoutSec = 300
     )
+    Disable-LabStdHandleInheritance
     $psi = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
     foreach ($arg in $ArgumentList) { $psi.ArgumentList.Add($arg) }
     $psi.RedirectStandardOutput = $true

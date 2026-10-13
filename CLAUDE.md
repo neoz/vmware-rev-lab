@@ -115,3 +115,6 @@ Suggest one when a sample needs it:
 - Unit tests: `pwsh -NoProfile -Command "Import-Module Pester -MinimumVersion 5.5; Invoke-Pester -Path tests -Output Detailed"`
 - End-to-end: `pwsh -NoProfile -File tests/smoke.ps1`
 - Rebuild from scratch: delete the VM in VMware and `.lab/state.json`, then `pwsh -File setup.ps1`.
+- Start host processes through `Invoke-LabProcess`: it clears the inherit flag on
+  the script's own stdout/stderr so a long-lived grandchild (vmware.exe from
+  `vmrun start gui`) cannot keep the caller's pipe open and hang the script.

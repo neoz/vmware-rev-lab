@@ -15,6 +15,26 @@ Describe 'Invoke-LabProcess' {
             Should -Throw -ExpectedMessage '*Timed out*' -PassThru
         $err.Exception.Message | Should -Not -Match 'S3cretArg'
     }
+
+    It 'does not let a long-lived grandchild hold the caller''s stdout open' {
+        # Mirrors `vmrun start gui`: the child exits but leaves vmware.exe running. When the
+        # caller captures our stdout (as Claude Code does), that pipe must still close.
+        $module = (Resolve-Path "$PSScriptRoot/../scripts/lib/LabCommon.psm1").Path
+        $inner = "Import-Module '$module' -Force; " +
+            "[void](Invoke-LabProcess -FilePath 'cmd.exe' -ArgumentList @('/c', 'start /b ping -n 25 127.0.0.1 >nul')); 'done'"
+        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        foreach ($arg in @('-NoProfile', '-NonInteractive', '-Command', $inner)) { $psi.ArgumentList.Add($arg) }
+        $psi.RedirectStandardOutput = $true
+        $psi.UseShellExecute = $false
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $outer = [System.Diagnostics.Process]::Start($psi)
+        $read = $outer.StandardOutput.ReadToEndAsync()
+        $closed = $read.Wait(15000)
+        $watch.Stop()
+        Get-Process ping -ErrorAction SilentlyContinue | Stop-Process -Force
+        $closed | Should -BeTrue -Because "stdout stayed open for $([int]$watch.Elapsed.TotalSeconds) s"
+        $read.Result | Should -Match 'done'
+    }
 }
 
 Describe 'Invoke-Vmrun' {
