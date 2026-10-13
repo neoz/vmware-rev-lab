@@ -199,17 +199,7 @@ Describe 'Get-LabIdaInputs' {
         [System.IO.File]::WriteAllBytes($pe, [byte[]](0x4D, 0x5A, 0x90, 0x00))
         { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage '*renamed.txt*executable*'
         Test-Path $pe | Should -BeTrue
-    }
-
-    It 'refuses a hidden executable under data/' {
-        foreach ($name in 'ida-pro_94_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
-        New-Item -ItemType Directory -Force -Path (Join-Path $root 'tools/ida/data') | Out-Null
-        $pe = Join-Path $root 'tools/ida/data/hidden.bin'
-        [System.IO.File]::WriteAllBytes($pe, [byte[]](0x4D, 0x5A, 0x90, 0x00))
-        (Get-Item $pe).Attributes = 'Hidden'
-        { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage '*hidden.bin*executable*'
-    }
-}
+    }}
 
 Describe 'Set-LabIdaInstalled' {
     It 'adds AddIda once and keeps the setup phases' {

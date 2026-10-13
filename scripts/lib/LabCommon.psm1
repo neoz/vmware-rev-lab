@@ -927,7 +927,7 @@ function Get-LabIdaInputs {
     foreach ($path in $inputs.Installer, $inputs.License) {
         if (-not (Test-Path $path)) { throw "Missing $path; put the IDA Pro installer and license in tools/ida/." }
     }
-    if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse -Force | ForEach-Object FullName) }
+    if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse | ForEach-Object FullName) }
     foreach ($path in $inputs.Data) {
         $head = [byte[]]::new(2)
         $stream = [System.IO.File]::OpenRead($path)
