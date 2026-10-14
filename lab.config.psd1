@@ -27,5 +27,10 @@
     McpWindbgPort      = 5002
     IdaMcpVersion      = '20261008.0.1'
     McpIdaPort         = 5003
+    # add-ida.ps1 also installs emulation: unicorn and z3 in venv-ida, angr[unicorn] in C:\lab\venv-emu.
+    # Unicorn and Z3 match the versions angr pins, so both venvs run the same engines.
+    AngrVersion        = '10.0.3'
+    UnicornVersion     = '2.1.4'
+    Z3Version          = '5.1.0.0'
     SysmonConfigUrl = 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/1836897f12fbd6a0a473665ef6abc34a6b497e31/sysmonconfig-export.xml'
 }

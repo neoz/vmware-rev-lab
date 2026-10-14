@@ -4,8 +4,8 @@
     Installs IDA Pro and ida-mcp (MCP server revlab-ida) into the clean snapshot.
 .DESCRIPTION
     Needs tools/ida/ida-pro_94_x64win.exe and tools/ida/idapro.hexlic on the host; files under tools/ida/data
-    are copied next to ida.exe. Reverts to clean, switches the guest to NAT, installs IDA and
-    ida-mcp, switches back to the isolated network and retakes the clean snapshot once all three MCP relays run.
+    are copied next to ida.exe. Reverts to clean, switches the guest to NAT, installs IDA,
+    ida-mcp and the emulation packages (unicorn and z3 in venv-ida, angr in C:\lab\venv-emu), switches back to the isolated network and retakes the clean snapshot once all three MCP relays run.
     Only a human runs this: it gives the guest Internet.
 .EXAMPLE
     .\scripts\add-ida.ps1
@@ -19,7 +19,12 @@ $inputs = Get-LabIdaInputs -Config $config
 Start-LabLog -Config $config -Name 'add-ida' | Out-Null
 try {
     New-LabGuestDirectory -Config $config -GuestPath 'C:\lab\tmp\ida'
-    Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-pro_94_x64win.exe'
+    # ida-install.ps1 skips the installer when IDA is already in the clean snapshot, so do not copy it.
+    if (Test-LabGuestFile -Config $config -GuestPath 'C:\Tools\IDA\ida.exe') {
+        Write-LabLog 'IDA is already installed in the guest; not copying the installer.'
+    } else {
+        Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-pro_94_x64win.exe'
+    }
     Copy-LabToGuest -Config $config -HostPath $inputs.License -GuestPath 'C:\lab\tmp\ida\idapro.hexlic'
     if ($inputs.Data) {
         # One zip keeps data/'s sub-folders; the guest expands it over C:\Tools\IDA.
@@ -30,6 +35,7 @@ try {
     }
     $r = Invoke-LabGuestScript -Config $config -Path (Join-Path $config.Root 'templates/guest/ida-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
         IdaMcpVersion = $config.IdaMcpVersion; IdaPort = "$($config.McpIdaPort)"; User = $config.GuestUser
+        AngrVersion = $config.AngrVersion; UnicornVersion = $config.UnicornVersion; Z3Version = $config.Z3Version
     }
     Write-LabLog $r.Output
     if ($r.ExitCode -ne 0) { throw "ida-install.ps1 exited $($r.ExitCode)" }

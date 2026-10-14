@@ -99,8 +99,9 @@ to `ida.exe`. Then run:
 pwsh -File scripts/add-ida.ps1
 ```
 
-It installs IDA Pro into `C:\Tools\IDA` and `ida-mcp` into its own venv,
-registers the `revlab-ida` relay, retakes the clean snapshot with all three
+It installs IDA Pro into `C:\Tools\IDA` and `ida-mcp` into its own venv
+(with `unicorn` and `z3-solver` for IDAPython), installs `angr[unicorn]` into
+`C:\lab\venv-emu` for standalone emulation scripts, registers the `revlab-ida` relay, retakes the clean snapshot with all three
 relays running and adds `revlab-ida` to `.mcp.json`. Reconnect it in `/mcp`.
 Like `add-tool.ps1`, it gives the guest Internet, so only a person runs it.
 

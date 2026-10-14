@@ -34,6 +34,23 @@ if not ida_name.set_name(ea, %s):
 print(hex(ea))
 """
 
+# mov eax, 7; add eax, 5 under unicorn, then z3 recovers the 7 from the emulated result.
+IDA_EMU = """
+import unicorn, z3
+from unicorn import x86_const
+code = bytes.fromhex("b80700000083c005")
+mu = unicorn.Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_32)
+mu.mem_map(0x1000, 0x1000)
+mu.mem_write(0x1000, code)
+mu.emu_start(0x1000, 0x1000 + len(code))
+eax = mu.reg_read(x86_const.UC_X86_REG_EAX)
+x = z3.BitVec("x", 32)
+s = z3.Solver()
+s.add(x + 5 == eax)
+assert s.check() == z3.sat
+print("eax=%d x=%s" % (eax, s.model()[x]))
+"""
+
 
 async def ida_call(session, tool, arguments):
     result = await session.call_tool(tool, arguments)
@@ -75,6 +92,9 @@ async def run(mcp_json, name, check, args):
                 await ida_call(s, "open_database", {"path": args[0]})
                 print(await ida_call(s, "execute_python", {"code": IDA_RENAME % json.dumps(args[1])}))
                 print(await ida_call(s, "save_database", {}))
+            elif check == "ida-emu":
+                await ida_call(s, "open_database", {"path": args[0]})
+                print(await ida_call(s, "execute_python", {"code": IDA_EMU}))
             elif check == "windbg-lm":
                 opened = text(await s.call_tool("open_cdb_remote", {"connection_string": args[0]}))
                 # mcp-windbg answers in text: first line "session_id: cdb-xxxxxxxx".

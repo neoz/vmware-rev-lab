@@ -45,6 +45,13 @@ Describe 'Get-LabConfig' {
         $c.McpIdaPort | Should -Be 5003
         @($c.McpGhidraPort, $c.McpWindbgPort) | Should -Not -Contain $c.McpIdaPort
     }
+
+    It 'pins the emulation packages add-ida.ps1 installs' {
+        $c = Get-LabConfig -Root $root
+        $c.AngrVersion | Should -Be '10.0.3'
+        $c.UnicornVersion | Should -Be '2.1.4'
+        $c.Z3Version | Should -Be '5.1.0.0'
+    }
 }
 
 Describe 'New-LabPassword' {

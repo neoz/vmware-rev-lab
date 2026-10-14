@@ -114,8 +114,19 @@ if ('AddIda' -in @(Get-LabState -Path $config.StatePath)) {
         $out = & $python -I $client $mcpJson revlab-ida ida-list $path 'revlab_ida_saved' 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0 -or $out -notmatch 'revlab_ida_saved') { throw "rename lost after save and revert: $out" }
     }
+
+    Test-Step '7c. execute_python emulates with unicorn and solves with z3' {
+        $path = Open-LabCase -Config $config -Case $notepadCase -Name 'notepad.exe'
+        $out = & $python -I $client $mcpJson revlab-ida ida-emu $path 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'eax=12 x=7') { throw "unexpected emulation result: $out" }
+    }
+
+    Test-Step '7d. venv-emu runs angr with unicorn and z3' {
+        $r = Invoke-LabGuestScript -Config $config -Path (Join-Path $root 'tests/fixtures/emu-check.ps1') -TimeoutSec 300
+        if ($r.ExitCode -ne 0 -or $r.Output -notmatch 'entry=0x') { throw "emu-check.ps1 exited $($r.ExitCode): $($r.Output)" }
+    }
 } else {
-    Write-LabLog 'SKIP 7a/7b: IDA is not installed (the user runs scripts/add-ida.ps1)'
+    Write-LabLog 'SKIP 7a-7d: IDA is not installed (the user runs scripts/add-ida.ps1)'
 }
 
 Test-Step '8. revlab-windbg attaches to a debug launch and runs lm' {

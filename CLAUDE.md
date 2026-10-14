@@ -60,6 +60,7 @@ projects, zipped) before reverting.
 | Dynamic (main) | `Frida`, `FridaTrace` | hook APIs with JS scripts, dump buffers and decrypted config |
 | Monitoring | `Procmon`, `Sysmon`, `Fakenet`, `Tshark` | run by `detonate.ps1`; `tshark -r` for pcaps |
 | Memory | `PeSieve`, `HollowsHunter` | dump unpacked / injected PEs |
+| Emulation (after `add-ida.ps1`) | `unicorn`, `z3` in `revlab-ida` `execute_python`; `PythonEmu` (angr, unicorn, z3) | emulate routines from the IDB and solve constraints in IDAPython; standalone `.py` under `C:\lab\tmp\` for symbolic execution with angr |
 | Other | `SevenZip`, `upx`, `py -3.13` (pefile, yara-python), oledump/pdfid | archives, UPX, own scripts, maldocs |
 
 ## IDA, Ghidra and WinDbg over MCP

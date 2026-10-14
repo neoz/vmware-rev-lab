@@ -1,5 +1,6 @@
 # Installs IDA Pro from C:\lab\tmp\ida, sets up ida-mcp on idalib and registers the RevlabMcpIda relay logon task.
-param([string]$IdaMcpVersion, [string]$IdaPort, [string]$User)
+# Also installs emulation: unicorn and z3 into venv-ida for execute_python, angr[unicorn] into C:\lab\venv-emu.
+param([string]$IdaMcpVersion, [string]$IdaPort, [string]$User, [string]$AngrVersion, [string]$UnicornVersion, [string]$Z3Version)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell turns stderr of a redirected native command into an error under 'Stop'; judge by exit code.
 function Invoke-Native([string]$File, [string[]]$Arguments) {
@@ -39,9 +40,20 @@ Assert-Native (Invoke-Native "$mcp\venv-hcli\Scripts\hcli.exe" @('ida', 'accept-
 # Loading idalib checks the license, so a bad license fails here instead of in Claude's first open_database.
 Assert-Native (Invoke-Native $python @('-c', 'import idapro')) 'import idapro'
 
+# IDAPython scripts run through execute_python can emulate code from the database with unicorn and solve with z3.
+Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "unicorn==$UnicornVersion", "z3-solver==$Z3Version")) 'pip unicorn z3-solver'
+Assert-Native (Invoke-Native $python @('-c', 'import unicorn, z3')) 'import unicorn, z3 (venv-ida)'
+# angr pins its own z3 and unicorn; its venv keeps them away from ida-mcp's.
+# pyvex leaves bitstring unpinned and breaks on bitstring 5, which dropped ConstBitStream.
+$emuPython = 'C:\lab\venv-emu\Scripts\python.exe'
+if (-not (Test-Path $emuPython)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', 'C:\lab\venv-emu')) 'venv venv-emu' }
+Assert-Native (Invoke-Native $emuPython @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "angr[unicorn]==$AngrVersion", 'bitstring==4.4.0')) 'pip angr'
+Assert-Native (Invoke-Native $emuPython @('-c', 'import angr, unicorn, z3')) 'import angr, unicorn, z3 (venv-emu)'
+
 $tools = Get-Content $toolsPath -Raw | ConvertFrom-Json
 $tools | Add-Member -NotePropertyName Ida -NotePropertyValue "$idaDir\ida.exe" -Force
 $tools | Add-Member -NotePropertyName IdaDir -NotePropertyValue $idaDir -Force
+$tools | Add-Member -NotePropertyName PythonEmu -NotePropertyValue $emuPython -Force
 $tools | ConvertTo-Json | Set-Content $toolsPath -Encoding UTF8
 
 $argLine = "`"$mcp\relay.py`" --port $IdaPort --log `"$mcp\relay-$IdaPort.log`" --child-log `"$mcp\child-$IdaPort.log`" " +
