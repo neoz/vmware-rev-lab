@@ -2,6 +2,7 @@
 <#
 .SYNOPSIS
     Detonates cases/<case>/sample.zip in the clean VM with Procmon, FakeNet-NG and Sysmon, then collects artefacts.
+    A case with an Internet policy (case-net.ps1) runs on NAT with a pktmon capture instead of FakeNet-NG.
 .PARAMETER Sample
     File to run when the zip holds several.
 .PARAMETER SampleArgs
@@ -41,12 +42,13 @@ $debugRun = $false
 $collected = $false
 Restore-LabClean -Config $config -SaveCase
 try {
+    $network = Set-LabCaseNetwork -Config $config -Case $Case
     Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\in\sample.zip'
     $prep = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'prepare-sample.ps1') -Arguments @{ Zip = 'C:\lab\in\sample.zip'; Name = $entry }
     if ($prep.ExitCode -ne 0) { throw "prepare-sample.ps1 failed: $($prep.Output)" }
     $samplePath = ($prep.Output -split "`r?`n")[-1].Trim()
 
-    $monitors = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'start-monitors.ps1') -Interactive
+    $monitors = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'start-monitors.ps1') -Arguments @{ Network = $network } -Interactive
     if ($monitors.ExitCode -ne 0) { throw "start-monitors.ps1 failed: $($monitors.Output)" }
     $start = ($monitors.Output -split "`r?`n")[-1].Trim()
 
@@ -72,7 +74,7 @@ try {
         Write-LabLog 'VM left running (-KeepRunning). Run .\scripts\reset.ps1 when done.'
     } elseif ($sampleStarted -and -not $collected) {
         # Reverting now would destroy the guest-side Procmon/FakeNet/Sysmon data of this run.
-        Write-LabLog 'Collection failed; VM left as is (still isolated) so artefacts under C:\lab\out can be recovered. Run .\scripts\reset.ps1 afterwards.'
+        Write-LabLog 'Collection failed; VM left as is (network unchanged) so artefacts under C:\lab\out can be recovered. Run .\scripts\reset.ps1 afterwards.'
     } else {
         Restore-LabClean -Config $config
     }
