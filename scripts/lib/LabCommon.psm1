@@ -815,6 +815,17 @@ function Set-LabCaseNetwork {
     $network
 }
 
+function Sync-LabCaseNetwork {
+    # case-net.ps1: a changed policy takes effect at once only for the case open in the running VM.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    if ((Get-LabCurrentCase -Config $Config) -ne $Case -or -not (Test-LabVmRunning -Config $Config)) {
+        Write-LabLog "Case '$Case' is not open in the running VM; the policy applies at its next case-open, detonate or debug."
+        return $false
+    }
+    Set-LabCaseNetwork -Config $Config -Case $Case | Out-Null
+    $true
+}
+
 $script:SupportedSampleExtensions = @('.exe', '.dll', '.ps1', '.bat', '.cmd')
 
 function Get-LabSampleEntry {

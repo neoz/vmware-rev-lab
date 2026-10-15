@@ -126,3 +126,29 @@ Describe 'Set-LabCaseNetwork' {
         Test-Path $marker | Should -BeFalse
     }
 }
+
+Describe 'Sync-LabCaseNetwork' {
+    BeforeEach {
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        Mock Write-LabLog -ModuleName LabCommon {}
+        Mock Set-LabCaseNetwork -ModuleName LabCommon { 'Internet' }
+    }
+
+    It 'applies the policy at once to the case open in the running VM' {
+        Mock Get-LabCurrentCase -ModuleName LabCommon { 'ctf' }
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Sync-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeTrue
+        Should -Invoke Set-LabCaseNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Case -eq 'ctf' }
+    }
+
+    It 'leaves the VM alone when <Why>' -ForEach @(
+        @{ Why = 'another case is open'; Open = 'other'; Running = $true }
+        @{ Why = 'no case is open'; Open = $null; Running = $true }
+        @{ Why = 'the VM is off'; Open = 'ctf'; Running = $false }
+    ) {
+        Mock Get-LabCurrentCase -ModuleName LabCommon { $Open }
+        Mock Test-LabVmRunning -ModuleName LabCommon { $Running }
+        Sync-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeFalse
+        Should -Invoke Set-LabCaseNetwork -ModuleName LabCommon -Times 0 -Exactly
+    }
+}

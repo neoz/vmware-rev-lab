@@ -6,4 +6,5 @@ Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name "case-open-$Case" | Out-Null
 $path = Open-LabCase -Config $config -Case $Case -Name $Sample
-Write-LabLog "Case '$Case' open in the guest: $path"
+$network = Set-LabCaseNetwork -Config $config -Case $Case
+Write-LabLog "Case '$Case' open in the guest ($network): $path"

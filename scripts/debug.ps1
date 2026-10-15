@@ -18,5 +18,6 @@ $runDir = Join-Path $caseDir ('runs/{0:yyyyMMdd-HHmmss}-debug' -f (Get-Date))
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 Restore-LabClean -Config $config -SaveCase
 $samplePath = Open-LabCase -Config $config -Case $Case -Name $entry
+Set-LabCaseNetwork -Config $config -Case $Case | Out-Null
 Start-LabSample -Config $config -SamplePath $samplePath -RunDir $runDir -Export $Export -SampleArgs $SampleArgs -Debugger (Get-LabGuestTools -Config $config).Cdb
 Write-LabLog "Sample is stopped under cdb. Attach with revlab-windbg open_cdb_remote 'npipe:server=.,pipe=revlab-dbg'. End with .\scripts\reset.ps1"
