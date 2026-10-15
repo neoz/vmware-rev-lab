@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name "net-$Mode" | Out-Null
+if ($UpdateSnapshot) { Assert-LabGuestUnused -Config $config }
 
 if ($Mode -eq 'Setup') {
     Restore-LabClean -Config $config

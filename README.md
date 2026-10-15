@@ -170,13 +170,17 @@ pwsh -File scripts/case-net.ps1 -Case <case> -Network Isolated   # back to isola
 pwsh -File scripts/case-net.ps1 -Case <case>                     # show the policy
 ```
 
-The policy lives in `cases/<case>/case.psd1`. `case-open.ps1`, `detonate.ps1`
-and `debug.ps1` put the guest on NAT for that case; if the case is already open,
-`case-net.ps1` power cycles the VM onto the new network at once (guest files
-stay, running programs do not). Every revert (`reset.ps1`, the end of
-`detonate.ps1`) returns the VM to the isolated segment, and the clean snapshot
-is never retaken online. Detonating an Internet case records traffic with
-`pktmon` (`runs/<ts>/text/net/capture.txt`) instead of FakeNet-NG.
+The policy lives in `cases/<case>/case.psd1` and needs the case's `sample.zip`
+in place: an Internet policy records the zip's SHA-256, so replacing the sample
+voids it until you run `case-net.ps1` again. `case-open.ps1`, `detonate.ps1`
+and `debug.ps1` put the guest on NAT for that case; if the case is open (or its
+detonation is still running), `case-net.ps1` power cycles the VM onto the new
+network at once (guest files stay; running programs and unsaved IDA/Ghidra
+changes do not). A guest in which a sample already ran since the last revert is
+never taken online: run `reset.ps1` first. Every revert (`reset.ps1`, the end
+of `detonate.ps1`) returns the VM to the isolated segment, and the clean
+snapshot is never retaken after a case. Detonating an Internet case records
+traffic with `pktmon` (`runs/<ts>/text/net/capture.txt`) instead of FakeNet-NG.
 
 Only a person runs `case-net.ps1`. VMware NAT reaches the host and its LAN, not
 only the Internet: use it for CTF binaries, not live malware.

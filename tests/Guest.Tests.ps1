@@ -94,6 +94,12 @@ Describe 'Restore-LabClean' {
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'start' }
     }
 
+    It 'does not revert at all during a manual Setup session (NAT without a case marker)' {
+        Set-Content $vmx @('ethernet0.connectionType = "nat"')
+        { Restore-LabClean -Config $cfg } | Should -Throw -ExpectedMessage '*net.ps1 -Mode Analysis*'
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'revertToSnapshot' }
+    }
+
     It 'leaves a case-driven NAT for the analysis segment after the revert' {
         Set-Content $vmx @('ethernet0.connectionType = "nat"')
         New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
