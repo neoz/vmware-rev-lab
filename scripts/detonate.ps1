@@ -40,9 +40,11 @@ $guest = Join-Path $config.Root 'templates/guest'
 $sampleStarted = $false
 $debugRun = $false
 $collected = $false
-Restore-LabClean -Config $config -SaveCase
+$network = Get-LabCaseNetwork -Config $config -Case $Case   # a bad policy stops here, before the revert
+$netState = if ($network -eq 'Internet') { 'still on NAT with Internet' } else { 'still isolated' }
+Restore-LabClean -Config $config -SaveCase -Network $network
 try {
-    $network = Set-LabCaseNetwork -Config $config -Case $Case
+    Set-LabCaseNetwork -Config $config -Case $Case | Out-Null
     Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\in\sample.zip'
     $prep = Invoke-LabGuestScript -Config $config -Path (Join-Path $guest 'prepare-sample.ps1') -Arguments @{ Zip = 'C:\lab\in\sample.zip'; Name = $entry }
     if ($prep.ExitCode -ne 0) { throw "prepare-sample.ps1 failed: $($prep.Output)" }
@@ -71,10 +73,10 @@ try {
         # reset.ps1 would discard this run's monitor data; collect.ps1 gathers it first.
         Write-LabLog "Debug run left running. When done: .\scripts\collect.ps1 -Case $Case (collects, then reverts)."
     } elseif ($KeepRunning) {
-        Write-LabLog 'VM left running (-KeepRunning). Run .\scripts\reset.ps1 when done.'
+        Write-LabLog "VM left running (-KeepRunning), $netState. Run .\scripts\reset.ps1 when done."
     } elseif ($sampleStarted -and -not $collected) {
         # Reverting now would destroy the guest-side Procmon/FakeNet/Sysmon data of this run.
-        Write-LabLog 'Collection failed; VM left as is (network unchanged) so artefacts under C:\lab\out can be recovered. Run .\scripts\reset.ps1 afterwards.'
+        Write-LabLog "Collection failed; VM left as is ($netState) so artefacts under C:\lab\out can be recovered. Run .\scripts\reset.ps1 afterwards."
     } else {
         Restore-LabClean -Config $config
     }

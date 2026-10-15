@@ -11,10 +11,14 @@ function Invoke-Native([string]$File, [string[]]$Arguments) {
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
 }
 
-New-Item -ItemType File -Force -Path "$out\fakenet\stop.flag" | Out-Null
-$deadline = (Get-Date).AddSeconds(30)
-while ((Get-Process -Name fakenet -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
-Get-Process -Name fakenet -ErrorAction SilentlyContinue | Stop-Process -Force
+# Isolated case: start-monitors.ps1 ran FakeNet-NG.
+$fakenet = Test-Path "$out\fakenet"
+if ($fakenet) {
+    New-Item -ItemType File -Force -Path "$out\fakenet\stop.flag" | Out-Null
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Process -Name fakenet -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+    Get-Process -Name fakenet -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 
 # Internet case: start-monitors.ps1 ran pktmon instead of FakeNet-NG.
 if (Test-Path "$out\net") {
@@ -43,10 +47,12 @@ Get-WinEvent -LogName 'Microsoft-Windows-Sysmon/Operational' -FilterXPath $query
 Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine |
     Format-Table -AutoSize | Out-String -Width 4096 | Set-Content -Path "$out\processes.txt"
 
-$fakenetDir = Split-Path -Parent $tools.Fakenet
-$pcap = Get-ChildItem -Path $fakenetDir, "$out\fakenet" -Filter '*.pcap' -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime | Select-Object -Last 1
-if ($pcap -and $pcap.DirectoryName -ne "$out\fakenet") { Move-Item -Path $pcap.FullName -Destination "$out\fakenet\" -Force }
+if ($fakenet) {
+    $fakenetDir = Split-Path -Parent $tools.Fakenet
+    $pcap = Get-ChildItem -Path $fakenetDir, "$out\fakenet" -Filter '*.pcap' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($pcap -and $pcap.DirectoryName -ne "$out\fakenet") { Move-Item -Path $pcap.FullName -Destination "$out\fakenet\" -Force }
+}
 
 Remove-Item -Path 'C:\lab\artefacts.zip', 'C:\lab\text.zip' -ErrorAction SilentlyContinue
 # 7-Zip exit 1 is a warning (for example a file still locked); the archive is still written.
