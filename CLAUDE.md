@@ -31,7 +31,8 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 |---|---|
 | Start from a clean VM | `pwsh -File scripts/reset.ps1` |
 | Run a sample with monitoring | `pwsh -File scripts/detonate.ps1 -Case <c> [-Timeout 120] [-Sample <name>] [-SampleArgs "..."] [-Export <fn>] [-KeepRunning]` |
-| Read detonation results | `cases/<c>/runs/<ts>/text/` (`procmon.csv`, `fakenet/fakenet.log`, `sysmon.json`, `processes.txt`) |
+| Read detonation results | `cases/<c>/runs/<ts>/text/` (`procmon.csv`, `fakenet/fakenet.log` or, for an Internet case, `net/capture.txt`, `sysmon.json`, `processes.txt`) |
+| Give a case Internet (user only) | `pwsh -File scripts/case-net.ps1 -Case <c> -Network Internet\|Isolated` |
 | Run a CLI tool in the guest | `vmrun_run` or `vmrun_script`, writing output under `C:\lab\out\static\` |
 | Bring a guest file to the host | `pwsh -File scripts/fetch.ps1 -Case <c> -GuestPath <p> [-Text]` |
 | Look at the screen | `vmrun_screenshot` |
@@ -119,6 +120,13 @@ Suggest one when a sample needs it:
 - Never switch the VM to Internet. `scripts/net.ps1 -Mode Setup` is run only
   by the user. Tools that change the VM's network, sharing or config are
   denied in `.claude/settings.json`; do not look for ways around that.
+- A case gets Internet only through the user's policy (`scripts/case-net.ps1`,
+  stored in `cases/<c>/case.psd1`). Claude never writes or works around it;
+  when a case needs Internet (a CTF challenge server, `pip install`), ask the
+  user to run `case-net.ps1`. Claude may then run `case-open.ps1`,
+  `detonate.ps1` and `debug.ps1` for that case; they put the guest on NAT and
+  every revert brings it back. On NAT the guest also reaches the host and its
+  LAN.
 - Revert to `clean` before each new case (`reset.ps1`; `detonate.ps1` does
   it itself).
 - Never delete the VM or its snapshots.

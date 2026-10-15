@@ -16,6 +16,19 @@ $deadline = (Get-Date).AddSeconds(30)
 while ((Get-Process -Name fakenet -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
 Get-Process -Name fakenet -ErrorAction SilentlyContinue | Stop-Process -Force
 
+# Internet case: start-monitors.ps1 ran pktmon instead of FakeNet-NG.
+if (Test-Path "$out\net") {
+    $r = Invoke-Native 'pktmon.exe' @('stop')
+    if ($r.ExitCode -ne 0) { Write-Output "WARN pktmon stop exit $($r.ExitCode): $($r.Output)" }
+    $r = Invoke-Native 'pktmon.exe' @('etl2pcap', "$out\net\capture.etl", '--out', "$out\net\capture.pcapng")
+    if ($r.ExitCode -ne 0) {
+        Write-Output "WARN pktmon etl2pcap exit $($r.ExitCode): $($r.Output)"
+    } else {
+        $r = Invoke-Native $tools.Tshark @('-r', "$out\net\capture.pcapng")
+        Set-Content -Path "$out\net\capture.txt" -Value $r.Output -Encoding UTF8
+    }
+}
+
 Start-Process -FilePath $tools.Procmon -ArgumentList '/Terminate' -Wait
 $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Process -Name Procmon64 -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
@@ -40,7 +53,7 @@ Remove-Item -Path 'C:\lab\artefacts.zip', 'C:\lab\text.zip' -ErrorAction Silentl
 $r = Invoke-Native $tools.SevenZip @('a', '-tzip', '-pinfected', 'C:\lab\artefacts.zip', "$out\*")
 if ($r.ExitCode -gt 1) { throw "7z artefacts.zip failed (exit $($r.ExitCode)):`n$($r.Output)" }
 # Only the monitor outputs go out unencrypted; the sample can write anything else under C:\lab\out.
-$textFiles = @('procmon.csv', 'fakenet\fakenet.log', 'sysmon.json', 'processes.txt') |
+$textFiles = @('procmon.csv', 'fakenet\fakenet.log', 'net\capture.txt', 'sysmon.json', 'processes.txt') |
     Where-Object { Test-Path (Join-Path $out $_) }
 Push-Location $out
 try {

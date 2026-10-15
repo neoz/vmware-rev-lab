@@ -467,10 +467,23 @@ function Start-LabVm {
 }
 
 function Get-LabSessionNotice {
-    # SessionStart hook output: warns the user and Claude when the VM is off, since the guest MCP bridges cannot connect then.
+    # SessionStart hook output: warns the user and Claude when the VM is off, since the guest MCP bridges cannot connect
+    # then, and when the guest is on NAT, so Claude knows anything it runs there reaches the Internet.
     param([Parameter(Mandatory)][hashtable]$Config)
     try {
-        if (Test-LabVmRunning -Config $Config) { return $null }
+        if (Test-LabVmRunning -Config $Config) {
+            if ((Get-LabVmxNetworkMode -Config $Config) -ne 'Setup') { return $null }
+            $netCase = Get-LabNetCase -Config $Config
+            $online = if ($netCase) { "The guest is on NAT with Internet: the user set an Internet policy for case '$netCase'." }
+                      else { 'The guest is on NAT with Internet: a manual net.ps1 -Mode Setup session is in progress.' }
+            return @{
+                systemMessage      = $online
+                hookSpecificOutput = @{
+                    hookEventName     = 'SessionStart'
+                    additionalContext = "$online Anything run in the guest reaches the Internet, the host and its LAN."
+                }
+            } | ConvertTo-Json -Compress
+        }
         $problem = "Lab VM is not running, so the revlab-* MCP servers cannot connect."
     } catch {
         $problem = "Could not check the lab VM state: $($_.Exception.Message)"
@@ -666,6 +679,8 @@ function Update-LabSnapshot {
 
 function Restore-LabClean {
     param([Parameter(Mandatory)][hashtable]$Config, [switch]$SaveCase)
+    # A manual net.ps1 -Mode Setup session (NAT without a case marker) is the user's; never revert it away.
+    Assert-LabNetworkOwned -Config $Config | Out-Null
     # Saving first means a failed save stops here, before any work in the guest is lost.
     if ($SaveCase -and (Test-LabVmRunning -Config $Config)) {
         try {
@@ -677,11 +692,19 @@ function Restore-LabClean {
     Invoke-Vmrun -Config $Config -Command revertToSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 600 | Out-Null
     Clear-LabRunState -Config $Config
     $mode = Get-LabVmxNetworkMode -Config $Config
-    if ($mode -ne 'Analysis') {
+    $netCase = Get-LabNetCase -Config $Config
+    if ($mode -ne 'Analysis' -and -not ($mode -eq 'Setup' -and $netCase)) {
         throw "VM network is '$mode', not on the analysis LAN segment. Refusing to resume. Run .\scripts\net.ps1 -Mode Analysis first."
     }
     Start-LabVm -Config $Config
     Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
+    if ($mode -eq 'Setup') {
+        # A case's Internet policy left the VM on NAT; the clean guest holds no sample yet.
+        Write-LabLog "Leaving NAT (Internet policy of case '$netCase')"
+        Switch-LabNetwork -Config $Config -Mode Analysis
+    } elseif ($netCase) {
+        Remove-Item -Path (Join-Path $Config.LabDir 'case-net.txt') -ErrorAction SilentlyContinue
+    }
 }
 
 function Test-LabIsoHash {
@@ -764,6 +787,88 @@ function Assert-LabIsolation {
     if ($r.ExitCode -ne 0) { throw "Isolation check failed: $($r.Output)" }
 }
 
+function Get-LabNetCase {
+    # The case whose Internet policy put the VM on NAT. Absent during the user's manual 'net.ps1 -Mode Setup'.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $path = Join-Path $Config.LabDir 'case-net.txt'
+    if (-not (Test-Path $path)) { return $null }
+    $case = (Get-Content -Path $path -Raw).Trim()
+    Assert-LabCaseName $case
+    $case
+}
+
+function Switch-LabNetwork {
+    # Power cycles the VM onto the other network. The guest disk is kept (no revert); running processes are not.
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][ValidateSet('Setup', 'Analysis')][string]$Mode
+    )
+    Stop-LabVm -Config $Config
+    Set-LabVmxNetwork -Config $Config -Mode $Mode
+    Start-LabVm -Config $Config
+    Wait-LabTools -Config $Config
+    Set-LabGuestNetwork -Config $Config -Mode $Mode
+    if ($Mode -eq 'Analysis') {
+        Assert-LabIsolation -Config $Config
+        Remove-Item -Path (Join-Path $Config.LabDir 'case-net.txt') -ErrorAction SilentlyContinue
+    }
+}
+
+function Assert-LabNetworkOwned {
+    # Returns the VMX network mode, refusing one no case policy explains: the user's manual net.ps1 -Mode Setup
+    # session (NAT without a case marker) or a hand-edited VMX. Lab scripts must not touch either.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $mode = Get-LabVmxNetworkMode -Config $Config
+    if ($mode -eq 'Unknown' -or ($mode -eq 'Setup' -and -not (Get-LabNetCase -Config $Config))) {
+        throw "VM network is '$mode', not on the analysis LAN segment, and no case policy put it there (a manual net.ps1 -Mode Setup session or a hand-edited VMX). Finish it with .\scripts\net.ps1 -Mode Analysis first."
+    }
+    $mode
+}
+
+function Assert-LabGuestUnused {
+    # Retaking the clean snapshot after a case, a sample run or a case-driven NAT would bake that state in.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $used = @('current-case.txt', 'sample-ran.txt', 'case-net.txt') | Where-Object { Test-Path (Join-Path $Config.LabDir $_) }
+    if ($used) {
+        throw "The guest held a case or a run since the last revert ($($used -join ', ')). Run .\scripts\reset.ps1 first, then .\scripts\net.ps1 -Mode Setup to make the change on a clean guest."
+    }
+}
+
+function Set-LabCaseNetwork {
+    # Puts the running VM on the network the case's policy asks for and returns that policy.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    $network = Get-LabCaseNetwork -Config $Config -Case $Case
+    $mode = Assert-LabNetworkOwned -Config $Config
+    if ($network -eq 'Internet' -and $mode -eq 'Analysis' -and (Test-Path (Join-Path $Config.LabDir 'sample-ran.txt'))) {
+        # Whatever ran (possibly another case's sample, with persistence) must not come back up online.
+        throw "A sample ran in the guest since the last revert, so it is not taken online. Run .\scripts\reset.ps1 first, then open case '$Case' again."
+    }
+    if ($network -eq 'Internet') {
+        # Written before the VMX changes, so an interrupted switch is still undone by the next revert.
+        New-Item -ItemType Directory -Force -Path $Config.LabDir | Out-Null
+        Set-Content -Path (Join-Path $Config.LabDir 'case-net.txt') -Value $Case -Encoding ascii
+        if ($mode -eq 'Analysis') { Switch-LabNetwork -Config $Config -Mode Setup }
+        Write-LabLog "Case '$Case' policy is Internet: the guest is on NAT and reaches the Internet, the host and its LAN."
+    } elseif ($mode -eq 'Setup') {
+        Switch-LabNetwork -Config $Config -Mode Analysis
+        Write-LabLog "Case '$Case' policy is Isolated: the guest is back on the analysis segment."
+    }
+    $network
+}
+
+function Sync-LabCaseNetwork {
+    # case-net.ps1: a changed policy takes effect at once for the case open in the running VM, or for the case whose
+    # Internet policy put it on NAT (a detonate -KeepRunning / -UnderDebugger run does not mark the case open).
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    $owns = (Get-LabCurrentCase -Config $Config) -eq $Case -or (Get-LabNetCase -Config $Config) -eq $Case
+    if (-not $owns -or -not (Test-LabVmRunning -Config $Config)) {
+        Write-LabLog "Case '$Case' is not open in the running VM; the policy applies at its next case-open, detonate or debug."
+        return $false
+    }
+    Set-LabCaseNetwork -Config $Config -Case $Case | Out-Null
+    $true
+}
+
 $script:SupportedSampleExtensions = @('.exe', '.dll', '.ps1', '.bat', '.cmd')
 
 function Get-LabSampleEntry {
@@ -804,6 +909,47 @@ function Assert-LabCaseName {
     if ($Case -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or $Case -match '\.\.') {
         throw "Invalid case name '$Case': use letters, digits, '.', '_' or '-', starting with a letter or digit."
     }
+}
+
+$script:CaseNetworks = @('Isolated', 'Internet')
+
+function Get-LabCaseNetwork {
+    # cases/<case>/case.psd1 is written only by the user (case-net.ps1); a missing file means isolated.
+    # An Internet policy holds the hash of the sample.zip the user approved, so swapping the sample voids it.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    Assert-LabCaseName $Case
+    $dir = Join-Path $Config.Root "cases/$Case"
+    $path = Join-Path $dir 'case.psd1'
+    if (-not (Test-Path $path)) { return 'Isolated' }
+    $policy = Import-PowerShellDataFile -Path $path
+    $network = $script:CaseNetworks | Where-Object { $_ -eq $policy['Network'] }
+    if (-not $network -or @($policy.Keys | Where-Object { $_ -notin 'Network', 'SampleSha256' }).Count) {
+        throw "Invalid ${path}: expected @{ Network = 'Isolated' } or @{ Network = 'Internet' }. Rewrite it with .\scripts\case-net.ps1 -Case $Case -Network <Isolated|Internet>."
+    }
+    if ($network -eq 'Internet') {
+        $zip = Join-Path $dir 'sample.zip'
+        $hash = if (Test-Path $zip) { (Get-FileHash -Path $zip -Algorithm SHA256).Hash } else { '' }
+        if (-not $policy['SampleSha256'] -or $policy['SampleSha256'] -ne $hash) {
+            throw "Case '$Case' sample.zip changed since the Internet policy was set (or the policy has no sample hash). Only the user re-approves it: .\scripts\case-net.ps1 -Case $Case -Network Internet."
+        }
+    }
+    $network
+}
+
+function Set-LabCaseNetworkPolicy {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Case,
+        [Parameter(Mandatory)][ValidateSet('Isolated', 'Internet')][string]$Network
+    )
+    Assert-LabCaseName $Case
+    $dir = Join-Path $Config.Root "cases/$Case"
+    $zip = Join-Path $dir 'sample.zip'
+    if (-not (Test-Path $zip)) { throw "Missing ${zip}: add the case's sample before setting its network policy." }
+    $text = if ($Network -eq 'Internet') {
+        "@{ Network = 'Internet'; SampleSha256 = '$((Get-FileHash -Path $zip -Algorithm SHA256).Hash)' }"
+    } else { "@{ Network = 'Isolated' }" }
+    Set-Content -Path (Join-Path $dir 'case.psd1') -Value $text -Encoding utf8
 }
 
 $script:TextFetchExtensions = @('.txt', '.log', '.json', '.csv', '.tsv', '.xml', '.md', '.yar', '.yara', '.c', '.cs', '.py', '.js', '.ini')
