@@ -8,6 +8,9 @@
     GuestUser       = 'analyst'
     ComputerName    = 'REVLAB'
     SnapshotName    = 'clean'
+    # $true shuts the guest down before each clean-snapshot retake: no MemoryMB-sized .vmem on disk,
+    # but every revert boots the guest (1-3 min slower). Takes effect at the next retake.
+    SnapshotPoweredOff = $false
     AnalysisPvnId   = '52 9a 0c 61 9b 3d 4e 5f-8a 21 7c 3d 9e 4b 1a 01'
     GuestIp         = '10.66.6.10'
     GuestPrefix     = '24'

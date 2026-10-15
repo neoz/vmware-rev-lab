@@ -44,7 +44,10 @@ never needs a network path to the host.
    To rerun from a given phase: `pwsh -File setup.ps1 -From GuestPrep`.
 3. When it finishes you have:
    - the VM at `VmxPath`, on an isolated network, with a `clean` snapshot
-     (powered on, logged in);
+     (powered on, logged in; set `SnapshotPoweredOff = $true` in
+     `lab.config.psd1` to save a RAM-sized `.vmem` at the cost of a guest boot
+     on every revert, applied at the next snapshot retake such as
+     `net.ps1 -Mode Analysis -UpdateSnapshot`);
    - `lab.local.psd1` with the generated guest password, ISO path and
      current snapshot name (not committed);
    - `.mcp.json` registering the three MCP servers for Claude Code;

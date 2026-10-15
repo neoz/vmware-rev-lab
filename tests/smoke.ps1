@@ -20,7 +20,9 @@ function Test-Step([string]$Name, [scriptblock]$Check) {
 Test-Step '1. clean snapshot exists and Tools come up after revert' {
     if ($config.SnapshotName -notin (Get-LabSnapshots -Config $config)) { throw "snapshot '$($config.SnapshotName)' missing" }
     $elapsed = Measure-Command { Restore-LabClean -Config $config }
-    if ($elapsed.TotalSeconds -gt 60) { throw "revert + Tools took $([int]$elapsed.TotalSeconds) s (limit 60)" }
+    # A powered-off snapshot boots the guest on every revert.
+    $limit = if ($config.SnapshotPoweredOff) { 300 } else { 60 }
+    if ($elapsed.TotalSeconds -gt $limit) { throw "revert + Tools took $([int]$elapsed.TotalSeconds) s (limit $limit)" }
 }
 
 Test-Step '2. guest is isolated' {

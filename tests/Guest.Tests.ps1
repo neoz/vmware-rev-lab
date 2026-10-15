@@ -39,6 +39,7 @@ Describe 'Snapshots' {
             $global:SnapOps.Add("$Command $($Arguments[0])")
             [pscustomobject]@{ Output = ''; GuestExitCode = 0 }
         }
+        Mock Stop-LabVm -ModuleName LabCommon {}
         Update-LabSnapshot -Config $c
         $global:SnapOps.Count | Should -Be 3
         $global:SnapOps[0] | Should -Be 'guest clear-workdirs.ps1'
@@ -46,6 +47,32 @@ Describe 'Snapshots' {
         $global:SnapOps[2] | Should -Be 'deleteSnapshot clean'
         $c.SnapshotName | Should -Match '^clean-\d{14}$'
         Should -Invoke Save-LabLocalConfig -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Values.SnapshotName -eq $c.SnapshotName }
+        Should -Invoke Stop-LabVm -ModuleName LabCommon -Times 0 -Exactly
+    }
+
+    It 'with SnapshotPoweredOff shuts the guest down for the snapshot and brings it back afterwards' {
+        $global:SnapOps = [System.Collections.Generic.List[string]]::new()
+        $c = @{ VmxPath = 'C:\vm\x.vmx'; SnapshotName = 'clean'; Root = $TestDrive; SnapshotPoweredOff = $true }
+        Mock Save-LabLocalConfig -ModuleName LabCommon {}
+        Mock Invoke-LabGuestScript -ModuleName LabCommon {
+            $global:SnapOps.Add("guest $([System.IO.Path]::GetFileName($Path))")
+            [pscustomobject]@{ ExitCode = 0; Output = '' }
+        }
+        Mock Stop-LabVm -ModuleName LabCommon { $global:SnapOps.Add('stop') }
+        Mock Start-LabVm -ModuleName LabCommon { $global:SnapOps.Add('start') }
+        Mock Wait-LabGuestReady -ModuleName LabCommon { $global:SnapOps.Add('ready') }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listSnapshots' } { [pscustomobject]@{ Output = "Total snapshots: 1`nclean"; GuestExitCode = 0 } }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -in 'deleteSnapshot', 'snapshot' } {
+            $global:SnapOps.Add("$Command $($Arguments[0])")
+            [pscustomobject]@{ Output = ''; GuestExitCode = 0 }
+        }
+        Update-LabSnapshot -Config $c
+        $global:SnapOps[0] | Should -Be 'guest clear-workdirs.ps1'
+        $global:SnapOps[1] | Should -Be 'stop'
+        $global:SnapOps[2] | Should -Match '^snapshot clean-\d{14}$'
+        $global:SnapOps[3] | Should -Be 'deleteSnapshot clean'
+        $global:SnapOps[4] | Should -Be 'start'
+        $global:SnapOps[5] | Should -Be 'ready'
     }
 
     It 'keeps the old snapshot when taking the new one fails' {
@@ -79,13 +106,17 @@ Describe 'Restore-LabClean' {
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'list' } { [pscustomobject]@{ Output = 'Total running VMs: 0'; GuestExitCode = 0 } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'start' } { [pscustomobject]@{ Output = ''; GuestExitCode = 0 } }
         Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'checkToolsState' } { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
+        Mock Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' } {
+            [pscustomobject]@{ Output = "pid=1, owner=x, cmd=pythonw.exe`npid=2, owner=x, cmd=pythonw.exe"; GuestExitCode = 0 }
+        }
     }
 
-    It 'reverts, starts the VM and waits for Tools on the analysis segment' {
+    It 'reverts, starts the VM and waits for Tools and the MCP relays on the analysis segment' {
         Set-Content $vmx @('ethernet0.connectionType = "pvn"', 'ethernet0.pvnID = "52 01"')
         Restore-LabClean -Config $cfg
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'revertToSnapshot' -and $Arguments[0] -eq 'clean' }
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'start' }
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -ParameterFilter { $Command -eq 'listProcessesInGuest' }
     }
 
     It 'refuses to start the VM when the VMX is on NAT' {

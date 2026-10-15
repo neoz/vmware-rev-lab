@@ -11,7 +11,9 @@ the host through `vmware-mcp` (MCP server `vmware-mcp`) and the scripts in
 
 - VM: `VmxPath` in `lab.config.psd1` (default `D:\working\vmware\revlab\revlab.vmx`).
 - Snapshot: `SnapshotName` in `lab.local.psd1` (`clean-<timestamp>` after the first
-  retake, `clean` before; powered on, logged in, isolated network).
+  retake, `clean` before; powered on and logged in, or powered off when
+  `SnapshotPoweredOff` is set, isolated network). Revert scripts wait for the
+  MCP relays either way.
 - Guest account: user `GuestUser` from `lab.config.psd1`, password
   `GuestPassword` from `lab.local.psd1`. Read them from those files when a
   `vmware-mcp` tool needs `user` / `password`. Never print the password in

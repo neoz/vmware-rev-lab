@@ -40,6 +40,7 @@ Describe 'Restore-LabClean -SaveCase' {
         Mock Start-Sleep -ModuleName LabCommon {}
         Mock Test-LabVmRunning -ModuleName LabCommon { $true }
         Mock Invoke-Vmrun -ModuleName LabCommon { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
+        Mock Wait-LabGuestReady -ModuleName LabCommon {}
     }
 
     It 'saves the open case before reverting' {
