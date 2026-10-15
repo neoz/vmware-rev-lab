@@ -465,10 +465,23 @@ function Start-LabVm {
 }
 
 function Get-LabSessionNotice {
-    # SessionStart hook output: warns the user and Claude when the VM is off, since the guest MCP bridges cannot connect then.
+    # SessionStart hook output: warns the user and Claude when the VM is off, since the guest MCP bridges cannot connect
+    # then, and when the guest is on NAT, so Claude knows anything it runs there reaches the Internet.
     param([Parameter(Mandatory)][hashtable]$Config)
     try {
-        if (Test-LabVmRunning -Config $Config) { return $null }
+        if (Test-LabVmRunning -Config $Config) {
+            if ((Get-LabVmxNetworkMode -Config $Config) -ne 'Setup') { return $null }
+            $netCase = Get-LabNetCase -Config $Config
+            $online = if ($netCase) { "The guest is on NAT with Internet: the user set an Internet policy for case '$netCase'." }
+                      else { 'The guest is on NAT with Internet: a manual net.ps1 -Mode Setup session is in progress.' }
+            return @{
+                systemMessage      = $online
+                hookSpecificOutput = @{
+                    hookEventName     = 'SessionStart'
+                    additionalContext = "$online Anything run in the guest reaches the Internet, the host and its LAN."
+                }
+            } | ConvertTo-Json -Compress
+        }
         $problem = "Lab VM is not running, so revlab-ghidra and revlab-windbg cannot connect."
     } catch {
         $problem = "Could not check the lab VM state: $($_.Exception.Message)"
