@@ -759,6 +759,54 @@ function Assert-LabIsolation {
     if ($r.ExitCode -ne 0) { throw "Isolation check failed: $($r.Output)" }
 }
 
+function Get-LabNetCase {
+    # The case whose Internet policy put the VM on NAT. Absent during the user's manual 'net.ps1 -Mode Setup'.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    $path = Join-Path $Config.LabDir 'case-net.txt'
+    if (-not (Test-Path $path)) { return $null }
+    $case = (Get-Content -Path $path -Raw).Trim()
+    Assert-LabCaseName $case
+    $case
+}
+
+function Switch-LabNetwork {
+    # Power cycles the VM onto the other network. The guest disk is kept (no revert); running processes are not.
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][ValidateSet('Setup', 'Analysis')][string]$Mode
+    )
+    Stop-LabVm -Config $Config
+    Set-LabVmxNetwork -Config $Config -Mode $Mode
+    Start-LabVm -Config $Config
+    Wait-LabTools -Config $Config
+    Set-LabGuestNetwork -Config $Config -Mode $Mode
+    if ($Mode -eq 'Analysis') {
+        Assert-LabIsolation -Config $Config
+        Remove-Item -Path (Join-Path $Config.LabDir 'case-net.txt') -ErrorAction SilentlyContinue
+    }
+}
+
+function Set-LabCaseNetwork {
+    # Puts the running VM on the network the case's policy asks for and returns that policy.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    $network = Get-LabCaseNetwork -Config $Config -Case $Case
+    $mode = Get-LabVmxNetworkMode -Config $Config
+    if ($mode -eq 'Unknown' -or ($mode -eq 'Setup' -and -not (Get-LabNetCase -Config $Config))) {
+        throw "VM network is '$mode' but no case policy put it there (a manual net.ps1 -Mode Setup session or a hand-edited VMX). Finish it with .\scripts\net.ps1 -Mode Analysis first."
+    }
+    if ($network -eq 'Internet') {
+        # Written before the VMX changes, so an interrupted switch is still undone by the next revert.
+        New-Item -ItemType Directory -Force -Path $Config.LabDir | Out-Null
+        Set-Content -Path (Join-Path $Config.LabDir 'case-net.txt') -Value $Case -Encoding ascii
+        if ($mode -eq 'Analysis') { Switch-LabNetwork -Config $Config -Mode Setup }
+        Write-LabLog "Case '$Case' policy is Internet: the guest is on NAT and reaches the Internet, the host and its LAN."
+    } elseif ($mode -eq 'Setup') {
+        Switch-LabNetwork -Config $Config -Mode Analysis
+        Write-LabLog "Case '$Case' policy is Isolated: the guest is back on the analysis segment."
+    }
+    $network
+}
+
 $script:SupportedSampleExtensions = @('.exe', '.dll', '.ps1', '.bat', '.cmd')
 
 function Get-LabSampleEntry {
