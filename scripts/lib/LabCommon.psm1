@@ -801,6 +801,34 @@ function Assert-LabCaseName {
     }
 }
 
+$script:CaseNetworks = @('Isolated', 'Internet')
+
+function Get-LabCaseNetwork {
+    # cases/<case>/case.psd1 is written only by the user (case-net.ps1); a missing file means isolated.
+    param([Parameter(Mandatory)][hashtable]$Config, [Parameter(Mandatory)][string]$Case)
+    Assert-LabCaseName $Case
+    $path = Join-Path $Config.Root "cases/$Case/case.psd1"
+    if (-not (Test-Path $path)) { return 'Isolated' }
+    $policy = Import-PowerShellDataFile -Path $path
+    $network = $script:CaseNetworks | Where-Object { $_ -eq $policy['Network'] }
+    if (-not $network -or @($policy.Keys | Where-Object { $_ -ne 'Network' }).Count) {
+        throw "Invalid ${path}: expected @{ Network = 'Isolated' } or @{ Network = 'Internet' }. Rewrite it with .\scripts\case-net.ps1 -Case $Case -Network <Isolated|Internet>."
+    }
+    $network
+}
+
+function Set-LabCaseNetworkPolicy {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$Case,
+        [Parameter(Mandatory)][ValidateSet('Isolated', 'Internet')][string]$Network
+    )
+    Assert-LabCaseName $Case
+    $dir = Join-Path $Config.Root "cases/$Case"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -Path (Join-Path $dir 'case.psd1') -Value "@{ Network = '$Network' }" -Encoding utf8
+}
+
 $script:TextFetchExtensions = @('.txt', '.log', '.json', '.csv', '.tsv', '.xml', '.md', '.yar', '.yara', '.c', '.cs', '.py', '.js', '.ini')
 
 function Assert-LabTextFetchPath {
