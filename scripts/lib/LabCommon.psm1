@@ -683,12 +683,7 @@ function Update-LabSnapshot {
 }
 
 function Restore-LabClean {
-    # -Network names the policy of the case that runs next, so an Internet case is not power cycled off NAT and back.
-    param(
-        [Parameter(Mandatory)][hashtable]$Config,
-        [switch]$SaveCase,
-        [ValidateSet('Isolated', 'Internet')][string]$Network = 'Isolated'
-    )
+    param([Parameter(Mandatory)][hashtable]$Config, [switch]$SaveCase)
     # A manual net.ps1 -Mode Setup session (NAT without a case marker) is the user's; never revert it away.
     Assert-LabNetworkOwned -Config $Config | Out-Null
     # Saving first means a failed save stops here, before any work in the guest is lost.
@@ -708,11 +703,7 @@ function Restore-LabClean {
     }
     Start-LabVm -Config $Config
     Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
-    if ($mode -eq 'Setup' -and $Network -eq 'Internet') {
-        # The next case goes online anyway; the clean guest (no sample yet) only needs a DHCP lease, not two power cycles.
-        Write-LabLog 'Staying on NAT for the next Internet case (clean guest)'
-        Set-LabGuestNetwork -Config $Config -Mode Setup
-    } elseif ($mode -eq 'Setup') {
+    if ($mode -eq 'Setup') {
         # A case's Internet policy left the VM on NAT; the clean guest holds no sample yet.
         Write-LabLog "Leaving NAT (Internet policy of case '$netCase')"
         Switch-LabNetwork -Config $Config -Mode Analysis

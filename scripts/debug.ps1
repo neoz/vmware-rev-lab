@@ -16,8 +16,8 @@ $caseDir = Join-Path $config.Root "cases/$Case"
 $entry = Get-LabSampleEntry -ZipPath (Join-Path $caseDir 'sample.zip') -Sample $Sample -Export $Export
 $runDir = Join-Path $caseDir ('runs/{0:yyyyMMdd-HHmmss}-debug' -f (Get-Date))
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
-$network = Get-LabCaseNetwork -Config $config -Case $Case   # a bad policy stops here, before the revert
-Restore-LabClean -Config $config -SaveCase -Network $network
+Get-LabCaseNetwork -Config $config -Case $Case | Out-Null   # a bad policy stops here, before the revert
+Restore-LabClean -Config $config -SaveCase
 $samplePath = Open-LabCase -Config $config -Case $Case -Name $entry
 Set-LabCaseNetwork -Config $config -Case $Case | Out-Null
 Start-LabSample -Config $config -SamplePath $samplePath -RunDir $runDir -Export $Export -SampleArgs $SampleArgs -Debugger (Get-LabGuestTools -Config $config).Cdb

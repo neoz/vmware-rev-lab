@@ -28,7 +28,10 @@ if (Test-Path "$out\net") {
     if ($r.ExitCode -ne 0) {
         Write-Output "WARN pktmon etl2pcap exit $($r.ExitCode): $($r.Output)"
     } else {
-        $r = Invoke-Native $tools.Tshark @('-r', "$out\net\capture.pcapng")
+        # tshark writes UTF-8 (arrows); Windows PowerShell would decode it with the console's OEM code page.
+        $consoleEncoding = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+        try { $r = Invoke-Native $tools.Tshark @('-r', "$out\net\capture.pcapng") } finally { [Console]::OutputEncoding = $consoleEncoding }
         Set-Content -Path "$out\net\capture.txt" -Value $r.Output -Encoding UTF8
     }
 }
