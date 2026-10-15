@@ -57,6 +57,7 @@ Describe 'Restore-LabClean case handling' {
         Mock Start-Sleep -ModuleName LabCommon {}
         Mock Test-LabVmRunning -ModuleName LabCommon { $true }
         Mock Invoke-Vmrun -ModuleName LabCommon { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
+        Mock Wait-LabGuestReady -ModuleName LabCommon {}
     }
 
     It 'points to -NoSave when saving fails' {
@@ -97,6 +98,7 @@ Describe 'Pending debug run' {
         Mock Start-Sleep -ModuleName LabCommon {}
         Mock Test-LabVmRunning -ModuleName LabCommon { $true }
         Mock Invoke-Vmrun -ModuleName LabCommon { [pscustomobject]@{ Output = 'running'; GuestExitCode = 0 } }
+        Mock Wait-LabGuestReady -ModuleName LabCommon {}
         Set-LabDebugRun -Config $cfg -Case 'c1' -RunDir 'D:\runs\1' -Start 's'
         Restore-LabClean -Config $cfg
         { Get-LabDebugRun -Config $cfg -Case 'c1' } | Should -Throw -ExpectedMessage '*No pending debug run*'

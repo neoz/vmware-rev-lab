@@ -671,6 +671,8 @@ function Update-LabSnapshot {
     if ($r.ExitCode -ne 0) { throw "clear-workdirs.ps1 failed: $($r.Output)" }
     $old = $Config.SnapshotName
     $new = '{0}-{1:yyyyMMddHHmmss}' -f ($old -replace '-\d{14}$', ''), (Get-Date)
+    # A powered-off snapshot holds no memory image (saves MemoryMB of disk); every revert then boots the guest.
+    if ($Config['SnapshotPoweredOff']) { Stop-LabVm -Config $Config }
     Write-LabLog "Taking snapshot '$new' (a running VM can take several minutes)"
     Invoke-Vmrun -Config $Config -Command snapshot -Arguments @($new) -TimeoutSec 1800 -ProgressLabel "snapshot '$new'" | Out-Null
     Save-LabLocalConfig -Root $Config.Root -Values @{ SnapshotName = $new }
@@ -680,6 +682,18 @@ function Update-LabSnapshot {
         Invoke-Vmrun -Config $Config -Command deleteSnapshot -Arguments @($old) -TimeoutSec 1800 -ProgressLabel "delete snapshot '$old'" | Out-Null
     }
     Write-LabLog "Snapshot '$new' taken (replaces '$old')"
+    if ($Config['SnapshotPoweredOff']) {
+        Start-LabVm -Config $Config
+        Wait-LabGuestReady -Config $Config
+    }
+}
+
+function Wait-LabGuestReady {
+    # The relays are logon tasks, so once they run the desktop is up too. Resuming a powered-on snapshot
+    # passes at once; a powered-off one waits out the boot and autologon.
+    param([Parameter(Mandatory)][hashtable]$Config)
+    Wait-LabTools -Config $Config -TimeoutSec 600 -PollSec 5
+    Wait-LabCondition -Description 'MCP relays running' -TimeoutSec 300 -PollSec 5 -Condition { Test-LabRelaysRunning -Config $Config }
 }
 
 function Restore-LabClean {
@@ -702,7 +716,7 @@ function Restore-LabClean {
         throw "VM network is '$mode', not on the analysis LAN segment. Refusing to resume. Run .\scripts\net.ps1 -Mode Analysis first."
     }
     Start-LabVm -Config $Config
-    Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
+    Wait-LabGuestReady -Config $Config
     if ($mode -eq 'Setup') {
         # A case's Internet policy left the VM on NAT; the clean guest holds no sample yet.
         Write-LabLog "Leaving NAT (Internet policy of case '$netCase')"
