@@ -675,11 +675,19 @@ function Restore-LabClean {
     Invoke-Vmrun -Config $Config -Command revertToSnapshot -Arguments @($Config.SnapshotName) -TimeoutSec 600 | Out-Null
     Clear-LabRunState -Config $Config
     $mode = Get-LabVmxNetworkMode -Config $Config
-    if ($mode -ne 'Analysis') {
+    $netCase = Get-LabNetCase -Config $Config
+    if ($mode -ne 'Analysis' -and -not ($mode -eq 'Setup' -and $netCase)) {
         throw "VM network is '$mode', not on the analysis LAN segment. Refusing to resume. Run .\scripts\net.ps1 -Mode Analysis first."
     }
     Start-LabVm -Config $Config
     Wait-LabTools -Config $Config -TimeoutSec 300 -PollSec 5
+    if ($mode -eq 'Setup') {
+        # A case's Internet policy left the VM on NAT; the clean guest holds no sample yet.
+        Write-LabLog "Leaving NAT (Internet policy of case '$netCase')"
+        Switch-LabNetwork -Config $Config -Mode Analysis
+    } elseif ($netCase) {
+        Remove-Item -Path (Join-Path $Config.LabDir 'case-net.txt') -ErrorAction SilentlyContinue
+    }
 }
 
 function Test-LabIsoHash {
