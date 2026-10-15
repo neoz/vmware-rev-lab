@@ -174,9 +174,10 @@ The policy lives in `cases/<case>/case.psd1` and needs the case's `sample.zip`
 in place: an Internet policy records the zip's SHA-256, so replacing the sample
 voids it until you run `case-net.ps1` again. `case-open.ps1`, `detonate.ps1`
 and `debug.ps1` put the guest on NAT for that case; if the case is open (or its
-detonation is still running), `case-net.ps1` power cycles the VM onto the new
-network at once (guest files stay; running programs and unsaved IDA/Ghidra
-changes do not). A guest in which a sample already ran since the last revert is
+detonation is still running), `case-net.ps1` asks for confirmation and then
+power cycles the VM onto the new network at once (guest files stay; running
+programs and unsaved IDA/Ghidra changes do not). Decline, and the policy applies
+at the next `case-open`/`detonate`/`debug`. A guest in which a sample already ran since the last revert is
 never taken online: run `reset.ps1` first. Every revert (`reset.ps1`, the end
 of `detonate.ps1`) returns the VM to the isolated segment, and the clean
 snapshot is never retaken after a case. Detonating an Internet case records

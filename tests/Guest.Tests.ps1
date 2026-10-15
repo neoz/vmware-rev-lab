@@ -111,6 +111,19 @@ Describe 'Restore-LabClean' {
         Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Mode -eq 'Analysis' }
     }
 
+    It 'stays on NAT with a DHCP lease, without power cycling, when the next case is an Internet case' {
+        Set-Content $vmx @('ethernet0.connectionType = "nat"')
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Mock Write-LabLog -ModuleName LabCommon {}
+        Mock Switch-LabNetwork -ModuleName LabCommon {}
+        Mock Set-LabGuestNetwork -ModuleName LabCommon {}
+        Restore-LabClean -Config $cfg -Network Internet
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+        Should -Invoke Set-LabGuestNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Mode -eq 'Setup' }
+        Get-LabNetCase -Config $cfg | Should -Be 'ctf'
+    }
+
     It 'drops a stale marker when the revert already restored the analysis segment' {
         Set-Content $vmx @('ethernet0.connectionType = "pvn"', 'ethernet0.pvnID = "52 01"')
         New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
@@ -241,6 +254,14 @@ Describe 'Get-LabSessionNotice' {
         $notice.systemMessage | Should -BeLike $Expected
         $notice.hookSpecificOutput.hookEventName | Should -Be 'SessionStart'
         $notice.hookSpecificOutput.additionalContext | Should -BeLike '*host and its LAN*'
+    }
+
+    It 'warns when the NIC is on a network the lab does not know (e.g. bridged)' {
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Unknown' }
+        $notice = Get-LabSessionNotice -Config $cfg | ConvertFrom-Json
+        $notice.systemMessage | Should -BeLike '*not on the analysis segment*'
+        $notice.hookSpecificOutput.additionalContext | Should -BeLike '*may reach*'
     }
 
     It 'warns the user and Claude when the VM is off' {

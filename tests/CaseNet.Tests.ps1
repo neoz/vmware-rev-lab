@@ -55,6 +55,11 @@ Describe 'Case network policy file' {
         { Get-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample.zip changed*case-net.ps1*'
     }
 
+    It 'names the allowed values when case.psd1 does not parse' {
+        & $writePolicy '@{ Network = '
+        { Get-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage "*case.psd1*'Isolated'*'Internet'*case-net.ps1*"
+    }
+
     It 'rejects a case name that leaves cases/' {
         { Set-LabCaseNetworkPolicy -Config $cfg -Case '..\x' -Network Internet } | Should -Throw -ExpectedMessage '*Invalid case name*'
         { Get-LabCaseNetwork -Config $cfg -Case '..\x' } | Should -Throw -ExpectedMessage '*Invalid case name*'
@@ -91,7 +96,7 @@ Describe 'Switch-LabNetwork' {
     It 'keeps the marker when the isolation check fails' {
         Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
         Mock Assert-LabIsolation -ModuleName LabCommon { throw 'Isolation check failed: 8.8.8.8 reachable' }
-        { Switch-LabNetwork -Config $cfg -Mode Analysis } | Should -Throw -ExpectedMessage '*8.8.8.8*'
+        { Switch-LabNetwork -Config $cfg -Mode Analysis } | Should -Throw -ExpectedMessage '*8.8.8.8*may still be online*net.ps1 -Mode Analysis*'
         Get-LabNetCase -Config $cfg | Should -Be 'ctf'
     }
 }
@@ -115,6 +120,32 @@ Describe 'Set-LabCaseNetwork' {
         { Set-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample ran*reset.ps1*'
         Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
         Test-Path $marker | Should -BeFalse
+    }
+
+    It "refuses to hand another case's online guest, where a sample ran, to this case" {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content (Join-Path $cfg.LabDir 'sample-ran.txt') 'x'
+        Set-Content $marker 'other'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        { Set-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample ran*reset.ps1*'
+        (Get-Content $marker -Raw).Trim() | Should -Be 'other'
+    }
+
+    It 'keeps its own online guest after its own sample ran' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content (Join-Path $cfg.LabDir 'sample-ran.txt') 'x'
+        Set-Content $marker 'ctf'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Internet'
+    }
+
+    It 'logs when it takes over a NAT another case left behind' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content $marker 'other'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Internet'
+        Should -Invoke Write-LabLog -ModuleName LabCommon -ParameterFilter { $Message -like "*'other'*'ctf'*" }
+        (Get-Content $marker -Raw).Trim() | Should -Be 'ctf'
     }
 
     It 'leaves an isolated case on the analysis segment alone' {
