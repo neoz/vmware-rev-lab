@@ -17,7 +17,8 @@ BeforeAll {
 Describe '.claude/settings.json' {
     It 'denies the user-only network scripts, direct VM config, the vmrun binary and its risky verbs' {
         $verbs = 'copyFileFromGuestToHost', 'SharedFolder', 'deleteSnapshot', 'deleteVM', 'writeVariable', 'NamedDevice'
-        $rules = @('Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)', 'Edit(**/*.vmx)')
+        $rules = @('Bash(*net.ps1*Setup*)', 'PowerShell(*net.ps1*Setup*)', 'Bash(*add-tool.ps1*)', 'PowerShell(*add-tool.ps1*)', 'Edit(**/*.vmx)',
+                   'Bash(*case-net.ps1*)', 'PowerShell(*case-net.ps1*)', 'Bash(*case.psd1*)', 'PowerShell(*case.psd1*)', 'Edit(**/case.psd1)')
         foreach ($tool in 'Bash', 'PowerShell') {
             $rules += "$tool(vmrun)", "$tool(vmrun *)", "$tool(*vmrun.exe*)", "$tool(*vmrun -T*)", "$tool(*vmrun*.vmx*)",
                       "$tool(*vmrun`"*)", "$tool(*vmrun'*)"
@@ -57,6 +58,9 @@ Describe '.claude/settings.json' {
             @{ Command = 'pwsh -NoProfile -Command "vmrun -T ws clone C:\vm\x.vmx C:\vm\y.vmx full"' }
             @{ Command = "'vmrun' list" }
             @{ Command = 'Start-Process vmrun -ArgumentList start,C:\vm\x.vmx' }
+            @{ Command = 'pwsh -File scripts/case-net.ps1 -Case ctf -Network Internet' }
+            @{ Command = "Set-Content cases/ctf/case.psd1 `"@{ Network = 'Internet' }`"" }
+            @{ Command = 'echo "@{ Network = ''Internet'' }" > cases/ctf/case.psd1' }
         ) {
             Test-Denied 'PowerShell' $Command | Should -BeTrue
             Test-Denied 'Bash' $Command | Should -BeTrue
@@ -67,6 +71,8 @@ Describe '.claude/settings.json' {
             @{ Command = 'git commit -m "fix: vmrun start gui hang"' }
             @{ Command = 'git log -S vmrun -- .claude/settings.json' }
             @{ Command = 'pwsh -File scripts/reset.ps1' }
+            @{ Command = 'pwsh -File scripts/case-open.ps1 -Case ctf' }
+            @{ Command = 'pwsh -File scripts/detonate.ps1 -Case ctf -Timeout 60' }
         ) {
             Test-Denied 'PowerShell' $Command | Should -BeFalse
             Test-Denied 'Bash' $Command | Should -BeFalse

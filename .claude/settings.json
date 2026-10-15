@@ -72,6 +72,10 @@
       "PowerShell(*net.ps1*Setup*)",
       "Bash(*add-tool.ps1*)",
       "PowerShell(*add-tool.ps1*)",
+      "Bash(*case-net.ps1*)",
+      "PowerShell(*case-net.ps1*)",
+      "Bash(*case.psd1*)",
+      "PowerShell(*case.psd1*)",
       "Bash(vmrun)",
       "Bash(vmrun *)",
       "Bash(*vmrun.exe*)",
@@ -98,7 +102,8 @@
       "PowerShell(*writeVariable*)",
       "Bash(*NamedDevice*)",
       "PowerShell(*NamedDevice*)",
-      "Edit(**/*.vmx)"
+      "Edit(**/*.vmx)",
+      "Edit(**/case.psd1)"
     ]
   },
   "hooks": {
