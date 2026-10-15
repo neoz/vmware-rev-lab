@@ -42,7 +42,7 @@ $debugRun = $false
 $collected = $false
 $network = Get-LabCaseNetwork -Config $config -Case $Case   # a bad policy stops here, before the revert
 $netState = if ($network -eq 'Internet') { 'still on NAT with Internet' } else { 'still isolated' }
-Restore-LabClean -Config $config -SaveCase -Network $network
+Restore-LabClean -Config $config -SaveCase
 try {
     Set-LabCaseNetwork -Config $config -Case $Case | Out-Null
     Copy-LabToGuest -Config $config -HostPath $zip -GuestPath 'C:\lab\in\sample.zip'
