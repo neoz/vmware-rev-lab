@@ -1,0 +1,231 @@
+BeforeAll {
+    Import-Module "$PSScriptRoot/../scripts/lib/LabCommon.psm1" -Force
+}
+
+Describe 'Case network policy file' {
+    BeforeEach {
+        $cfg = @{ Root = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        New-Item -ItemType Directory -Force -Path $cfg.Root | Out-Null
+        $dir = Join-Path $cfg.Root 'cases/ctf'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $zip = Join-Path $dir 'sample.zip'
+        Set-Content $zip 'zip one'
+        $writePolicy = { param($text) Set-Content (Join-Path $dir 'case.psd1') $text }
+    }
+
+    It 'is Isolated when the case has no policy file' {
+        Get-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Isolated'
+    }
+
+    It 'round trips both values' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Get-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeExactly 'Internet'
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Isolated
+        Get-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeExactly 'Isolated'
+    }
+
+    It 'binds an Internet policy to the sample.zip it was set for' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content $zip 'a different sample'
+        { Get-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample.zip changed*case-net.ps1*'
+    }
+
+    It 'refuses a policy for a case without sample.zip' {
+        Remove-Item $zip
+        { Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet } | Should -Throw -ExpectedMessage '*sample.zip*'
+        Test-Path (Join-Path $dir 'case.psd1') | Should -BeFalse
+    }
+
+    It 'normalises the casing of a hand-written value' {
+        & $writePolicy "@{ Network = 'isolated' }"
+        Get-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeExactly 'Isolated'
+    }
+
+    It 'refuses <Text>' -ForEach @(
+        @{ Text = "@{ Network = 'Online' }" }
+        @{ Text = "@{ Network = 'Isolated'; Proxy = 'x' }" }
+        @{ Text = '@{ }' }
+    ) {
+        & $writePolicy $Text
+        { Get-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage "*case.psd1*'Isolated'*'Internet'*case-net.ps1*"
+    }
+
+    It 'refuses a hand-written Internet policy without the sample hash' {
+        & $writePolicy "@{ Network = 'Internet' }"
+        { Get-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample.zip changed*case-net.ps1*'
+    }
+
+    It 'rejects a case name that leaves cases/' {
+        { Set-LabCaseNetworkPolicy -Config $cfg -Case '..\x' -Network Internet } | Should -Throw -ExpectedMessage '*Invalid case name*'
+        { Get-LabCaseNetwork -Config $cfg -Case '..\x' } | Should -Throw -ExpectedMessage '*Invalid case name*'
+    }
+}
+
+Describe 'Switch-LabNetwork' {
+    BeforeEach {
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+        $global:NetOps = [System.Collections.Generic.List[string]]::new()
+        Mock Stop-LabVm -ModuleName LabCommon { $global:NetOps.Add('stop') }
+        Mock Set-LabVmxNetwork -ModuleName LabCommon { $global:NetOps.Add("vmx $Mode") }
+        Mock Start-LabVm -ModuleName LabCommon { $global:NetOps.Add('start') }
+        Mock Wait-LabTools -ModuleName LabCommon { $global:NetOps.Add('tools') }
+        Mock Set-LabGuestNetwork -ModuleName LabCommon { $global:NetOps.Add("guest $Mode") }
+        Mock Assert-LabIsolation -ModuleName LabCommon { $global:NetOps.Add('isolation') }
+    }
+
+    It 'power cycles onto NAT without an isolation check and keeps the marker' {
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Switch-LabNetwork -Config $cfg -Mode Setup
+        $global:NetOps -join ',' | Should -Be 'stop,vmx Setup,start,tools,guest Setup'
+        Get-LabNetCase -Config $cfg | Should -Be 'ctf'
+    }
+
+    It 'checks isolation after going back and only then removes the marker' {
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Switch-LabNetwork -Config $cfg -Mode Analysis
+        $global:NetOps -join ',' | Should -Be 'stop,vmx Analysis,start,tools,guest Analysis,isolation'
+        Get-LabNetCase -Config $cfg | Should -BeNullOrEmpty
+    }
+
+    It 'keeps the marker when the isolation check fails' {
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Mock Assert-LabIsolation -ModuleName LabCommon { throw 'Isolation check failed: 8.8.8.8 reachable' }
+        { Switch-LabNetwork -Config $cfg -Mode Analysis } | Should -Throw -ExpectedMessage '*8.8.8.8*'
+        Get-LabNetCase -Config $cfg | Should -Be 'ctf'
+    }
+}
+
+Describe 'Set-LabCaseNetwork' {
+    BeforeEach {
+        $cfg = @{ Root = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        $cfg.LabDir = Join-Path $cfg.Root '.lab'
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+        $marker = Join-Path $cfg.LabDir 'case-net.txt'
+        New-Item -ItemType Directory -Force -Path (Join-Path $cfg.Root 'cases/ctf') | Out-Null
+        Set-Content (Join-Path $cfg.Root 'cases/ctf/sample.zip') 'zip'
+        Mock Write-LabLog -ModuleName LabCommon {}
+        Mock Switch-LabNetwork -ModuleName LabCommon {}
+    }
+
+    It 'refuses to take the guest online after a sample ran since the last revert' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content (Join-Path $cfg.LabDir 'sample-ran.txt') 'x'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Analysis' }
+        { Set-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*sample ran*reset.ps1*'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+        Test-Path $marker | Should -BeFalse
+    }
+
+    It 'leaves an isolated case on the analysis segment alone' {
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Analysis' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Isolated'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+        Test-Path $marker | Should -BeFalse
+    }
+
+    It 'writes the marker before switching an Internet case to NAT' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Analysis' }
+        Mock Switch-LabNetwork -ModuleName LabCommon { (Get-Content $marker -Raw).Trim() | Should -Be 'ctf' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Internet'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Mode -eq 'Setup' }
+    }
+
+    It 'does not power cycle an Internet case that is already on NAT' {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Set-Content $marker 'ctf'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Internet'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+    }
+
+    It 'brings an isolated case back from a case-driven NAT' {
+        Set-Content $marker 'ctf'
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        Set-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -Be 'Isolated'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Mode -eq 'Analysis' }
+    }
+
+    It 'refuses <Mode> without a marker (manual Setup session or hand-edited VMX)' -ForEach @(
+        @{ Mode = 'Setup' }
+        @{ Mode = 'Unknown' }
+    ) {
+        Set-LabCaseNetworkPolicy -Config $cfg -Case 'ctf' -Network Internet
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { $Mode }
+        { Set-LabCaseNetwork -Config $cfg -Case 'ctf' } | Should -Throw -ExpectedMessage '*net.ps1 -Mode Analysis*'
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+        Test-Path $marker | Should -BeFalse
+    }
+}
+
+Describe 'Sync-LabCaseNetwork' {
+    BeforeEach {
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        Mock Write-LabLog -ModuleName LabCommon {}
+        Mock Set-LabCaseNetwork -ModuleName LabCommon { 'Internet' }
+        Mock Get-LabNetCase -ModuleName LabCommon { $null }
+    }
+
+    It 'takes a detonated case offline at once when its own Internet policy put the VM on NAT' {
+        Mock Get-LabCurrentCase -ModuleName LabCommon { $null }
+        Mock Get-LabNetCase -ModuleName LabCommon { 'ctf' }
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Sync-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeTrue
+        Should -Invoke Set-LabCaseNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Case -eq 'ctf' }
+    }
+
+    It 'applies the policy at once to the case open in the running VM' {
+        Mock Get-LabCurrentCase -ModuleName LabCommon { 'ctf' }
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Sync-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeTrue
+        Should -Invoke Set-LabCaseNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Case -eq 'ctf' }
+    }
+
+    It 'leaves the VM alone when <Why>' -ForEach @(
+        @{ Why = 'another case is open'; Open = 'other'; Running = $true }
+        @{ Why = 'no case is open'; Open = $null; Running = $true }
+        @{ Why = 'the VM is off'; Open = 'ctf'; Running = $false }
+    ) {
+        Mock Get-LabCurrentCase -ModuleName LabCommon { $Open }
+        Mock Test-LabVmRunning -ModuleName LabCommon { $Running }
+        Sync-LabCaseNetwork -Config $cfg -Case 'ctf' | Should -BeFalse
+        Should -Invoke Set-LabCaseNetwork -ModuleName LabCommon -Times 0 -Exactly
+    }
+}
+
+Describe 'Assert-LabGuestUnused' {
+    BeforeEach {
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+    }
+
+    It 'passes for a guest untouched since the last revert' {
+        { Assert-LabGuestUnused -Config $cfg } | Should -Not -Throw
+    }
+
+    It 'refuses when <File> shows the guest held a case or a run' -ForEach @(
+        @{ File = 'current-case.txt' }
+        @{ File = 'sample-ran.txt' }
+        @{ File = 'case-net.txt' }
+    ) {
+        Set-Content (Join-Path $cfg.LabDir $File) 'ctf'
+        { Assert-LabGuestUnused -Config $cfg } | Should -Throw -ExpectedMessage '*reset.ps1*'
+    }
+}
+
+Describe 'Assert-LabNetworkOwned' {
+    BeforeEach {
+        $cfg = @{ LabDir = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) }
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+    }
+
+    It 'returns <Mode> when a case policy or the analysis segment explains it' -ForEach @(
+        @{ Mode = 'Analysis'; Marker = $false }
+        @{ Mode = 'Setup'; Marker = $true }
+    ) {
+        if ($Marker) { Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf' }
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { $Mode }
+        Assert-LabNetworkOwned -Config $cfg | Should -Be $Mode
+    }
+}

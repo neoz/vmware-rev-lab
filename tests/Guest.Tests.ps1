@@ -93,6 +93,33 @@ Describe 'Restore-LabClean' {
         { Restore-LabClean -Config $cfg } | Should -Throw -ExpectedMessage '*not on the analysis LAN segment*'
         Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'start' }
     }
+
+    It 'does not revert at all during a manual Setup session (NAT without a case marker)' {
+        Set-Content $vmx @('ethernet0.connectionType = "nat"')
+        { Restore-LabClean -Config $cfg } | Should -Throw -ExpectedMessage '*net.ps1 -Mode Analysis*'
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 0 -Exactly -ParameterFilter { $Command -eq 'revertToSnapshot' }
+    }
+
+    It 'leaves a case-driven NAT for the analysis segment after the revert' {
+        Set-Content $vmx @('ethernet0.connectionType = "nat"')
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Mock Write-LabLog -ModuleName LabCommon {}
+        Mock Switch-LabNetwork -ModuleName LabCommon {}
+        Restore-LabClean -Config $cfg
+        Should -Invoke Invoke-Vmrun -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Command -eq 'revertToSnapshot' }
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 1 -Exactly -ParameterFilter { $Mode -eq 'Analysis' }
+    }
+
+    It 'drops a stale marker when the revert already restored the analysis segment' {
+        Set-Content $vmx @('ethernet0.connectionType = "pvn"', 'ethernet0.pvnID = "52 01"')
+        New-Item -ItemType Directory -Force -Path $cfg.LabDir | Out-Null
+        Set-Content (Join-Path $cfg.LabDir 'case-net.txt') 'ctf'
+        Mock Switch-LabNetwork -ModuleName LabCommon {}
+        Restore-LabClean -Config $cfg
+        Should -Invoke Switch-LabNetwork -ModuleName LabCommon -Times 0 -Exactly
+        Test-Path (Join-Path $cfg.LabDir 'case-net.txt') | Should -BeFalse
+    }
 }
 
 Describe 'New-LabGuestDirectory' {
@@ -197,9 +224,23 @@ Describe 'Test-LabRelaysRunning' {
 Describe 'Get-LabSessionNotice' {
     BeforeAll { $cfg = @{ VmxPath = 'C:\vm\x.vmx' } }
 
-    It 'says nothing when the VM is running' {
+    It 'says nothing when the VM is running isolated' {
         Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Analysis' }
         Get-LabSessionNotice -Config $cfg | Should -BeNullOrEmpty
+    }
+
+    It 'tells Claude the guest is online for <Why>' -ForEach @(
+        @{ Why = 'a case policy'; NetCase = 'ctf'; Expected = "*NAT*Internet*case 'ctf'*" }
+        @{ Why = 'a manual Setup session'; NetCase = $null; Expected = '*NAT*Internet*net.ps1 -Mode Setup*' }
+    ) {
+        Mock Test-LabVmRunning -ModuleName LabCommon { $true }
+        Mock Get-LabVmxNetworkMode -ModuleName LabCommon { 'Setup' }
+        Mock Get-LabNetCase -ModuleName LabCommon { $NetCase }
+        $notice = Get-LabSessionNotice -Config $cfg | ConvertFrom-Json
+        $notice.systemMessage | Should -BeLike $Expected
+        $notice.hookSpecificOutput.hookEventName | Should -Be 'SessionStart'
+        $notice.hookSpecificOutput.additionalContext | Should -BeLike '*host and its LAN*'
     }
 
     It 'warns the user and Claude when the VM is off' {

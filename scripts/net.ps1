@@ -16,22 +16,14 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/LabCommon.psm1') -Force
 $config = Get-LabConfig
 Start-LabLog -Config $config -Name "net-$Mode" | Out-Null
+if ($UpdateSnapshot) { Assert-LabGuestUnused -Config $config }
 
 if ($Mode -eq 'Setup') {
     Restore-LabClean -Config $config
-    Stop-LabVm -Config $config
-    Set-LabVmxNetwork -Config $config -Mode Setup
-    Start-LabVm -Config $config
-    Wait-LabTools -Config $config
-    Set-LabGuestNetwork -Config $config -Mode Setup
+    Switch-LabNetwork -Config $config -Mode Setup
     Write-LabLog 'Guest is on NAT with Internet. When done: .\scripts\net.ps1 -Mode Analysis -UpdateSnapshot'
 } else {
-    Stop-LabVm -Config $config
-    Set-LabVmxNetwork -Config $config -Mode Analysis
-    Start-LabVm -Config $config
-    Wait-LabTools -Config $config
-    Set-LabGuestNetwork -Config $config -Mode Analysis
-    Assert-LabIsolation -Config $config
+    Switch-LabNetwork -Config $config -Mode Analysis
     if ($UpdateSnapshot) {
         Restart-LabGuest -Config $config
         Wait-LabDesktop -Config $config

@@ -159,6 +159,32 @@ Attach from `revlab-windbg` with `open_cdb_remote` and
 `npipe:server=.,pipe=revlab-dbg`. Finish with `scripts/reset.ps1` (after
 `debug.ps1`) or `scripts/collect.ps1 -Case <case>` (after `-UnderDebugger`).
 
+### CTF cases with Internet
+
+Some challenges need the guest online (a remote challenge server, `pip install`
+of a solver dependency). Give that case an Internet policy:
+
+```powershell
+pwsh -File scripts/case-net.ps1 -Case <case> -Network Internet   # NAT for this case
+pwsh -File scripts/case-net.ps1 -Case <case> -Network Isolated   # back to isolated
+pwsh -File scripts/case-net.ps1 -Case <case>                     # show the policy
+```
+
+The policy lives in `cases/<case>/case.psd1` and needs the case's `sample.zip`
+in place: an Internet policy records the zip's SHA-256, so replacing the sample
+voids it until you run `case-net.ps1` again. `case-open.ps1`, `detonate.ps1`
+and `debug.ps1` put the guest on NAT for that case; if the case is open (or its
+detonation is still running), `case-net.ps1` power cycles the VM onto the new
+network at once (guest files stay; running programs and unsaved IDA/Ghidra
+changes do not). A guest in which a sample already ran since the last revert is
+never taken online: run `reset.ps1` first. Every revert (`reset.ps1`, the end
+of `detonate.ps1`) returns the VM to the isolated segment, and the clean
+snapshot is never retaken after a case. Detonating an Internet case records
+traffic with `pktmon` (`runs/<ts>/text/net/capture.txt`) instead of FakeNet-NG.
+
+Only a person runs `case-net.ps1`. VMware NAT reaches the host and its LAN, not
+only the Internet: use it for CTF binaries, not live malware.
+
 ### Bring files back and reset
 
 ```powershell
@@ -173,7 +199,8 @@ pwsh -File scripts/reset.ps1                                           # save th
 
 - Samples stay zipped on the host; they are only extracted and run in the guest.
 - The analysis network is isolated. Only a person switches it to Internet
-  (`scripts/net.ps1 -Mode Setup`, `scripts/add-tool.ps1`).
+  (`scripts/net.ps1 -Mode Setup`, `scripts/add-tool.ps1`, or a case policy
+  set with `scripts/case-net.ps1`).
 - Never contact a sample's URLs, domains or IPs from the host.
 - Revert to the clean snapshot before each new case.
 - `.claude/settings.json` denies the `vmware-mcp` tools that change the VM's
