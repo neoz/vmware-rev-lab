@@ -14,6 +14,14 @@ PowerShell scripts and three MCP servers:
 The IDA, Ghidra and WinDbg servers reach the host over VMCI vSockets, so the guest
 never needs a network path to the host.
 
+## Tour
+
+[![RevLab guided tour](docs/media/revlab-tour.png)](docs/media/revlab-tour.mp4)
+
+A one-minute walkthrough: setup, then a case through static analysis,
+dynamic analysis, results and reset. Click the image to open the video
+(`docs/media/revlab-tour.mp4`). Tool output in the video is example data.
+
 ## Requirements
 
 - Windows host with VMware Workstation 17 or newer.
