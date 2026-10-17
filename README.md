@@ -15,8 +15,9 @@ The IDA, Ghidra and WinDbg servers reach the host over VMCI vSockets, so the gue
 never needs a network path to the host.
 
 ## Tour
+https://github.com/user-attachments/assets/c64e9775-f952-400c-bb0f-461dcbde5bfe
 
-[![RevLab guided tour](docs/media/revlab-tour.png)](docs/media/revlab-tour.mp4)
+
 
 A one-minute walkthrough: setup, then a case through static analysis,
 dynamic analysis, results and reset. Click the image to open the video
