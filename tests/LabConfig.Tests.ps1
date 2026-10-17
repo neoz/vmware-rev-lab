@@ -39,9 +39,8 @@ Describe 'Get-LabConfig' {
         (Get-LabConfig -Root $root).IsoPath | Should -Be "D:\it's.iso"
     }
 
-    It 'pins ida-mcp and gives revlab-ida its own vSocket port' {
+    It 'gives revlab-ida its own vSocket port' {
         $c = Get-LabConfig -Root $root
-        $c.IdaMcpVersion | Should -Be '20261008.0.1'
         $c.McpIdaPort | Should -Be 5003
         @($c.McpGhidraPort, $c.McpWindbgPort) | Should -Not -Contain $c.McpIdaPort
     }

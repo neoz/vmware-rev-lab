@@ -28,7 +28,7 @@
     McpWindbgVersion   = '1.5.1'
     McpGhidraPort      = 5001
     McpWindbgPort      = 5002
-    IdaMcpVersion      = '20261008.0.1'
+    # add-ida.ps1 installs the newest ida-mcp release that hcli lists as compatible with the installed IDA.
     McpIdaPort         = 5003
     # add-ida.ps1 also installs emulation: unicorn and z3 in venv-ida, angr[unicorn] in C:\lab\venv-emu.
     # Unicorn and Z3 match the versions angr pins, so both venvs run the same engines.

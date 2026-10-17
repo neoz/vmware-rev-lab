@@ -1,6 +1,6 @@
 # Installs IDA Pro from C:\lab\tmp\ida, sets up ida-mcp on idalib and registers the RevlabMcpIda relay logon task.
 # Also installs emulation: unicorn and z3 into venv-ida for execute_python, angr[unicorn] into C:\lab\venv-emu.
-param([string]$IdaMcpVersion, [string]$IdaPort, [string]$User, [string]$AngrVersion, [string]$UnicornVersion, [string]$Z3Version)
+param([string]$IdaPort, [string]$User, [string]$AngrVersion, [string]$UnicornVersion, [string]$Z3Version)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell turns stderr of a redirected native command into an error under 'Stop'; judge by exit code.
 function Invoke-Native([string]$File, [string[]]$Arguments) {
@@ -17,7 +17,7 @@ $toolsPath = 'C:\lab\tools.json'
 
 # Piping the output (Invoke-Native) makes PowerShell wait for the installer to exit.
 if (-not (Test-Path "$idaDir\ida.exe")) {
-    Assert-Native (Invoke-Native "$staging\ida-pro_94_x64win.exe" @('--mode', 'unattended', '--prefix', $idaDir, '--install_python', '0')) 'IDA installer'
+    Assert-Native (Invoke-Native "$staging\ida-installer.exe" @('--mode', 'unattended', '--prefix', $idaDir, '--install_python', '0')) 'IDA installer'
     if (-not (Test-Path "$idaDir\ida.exe")) { throw "IDA installer exited but $idaDir\ida.exe is missing" }
 } else {
     Write-Output "IDA is already installed in $idaDir; installer skipped (uninstall it in the guest to install a newer one)."
@@ -27,16 +27,33 @@ Copy-Item -Path "$staging\idapro.hexlic" -Destination $idaDir -Force
 if (Test-Path "$staging\data.zip") { Expand-Archive -Path "$staging\data.zip" -DestinationPath $idaDir -Force }
 Remove-Item -Path $staging -Recurse -Force
 
+# hcli accepts the EULA and picks the ida-mcp release for this IDA; its own venv keeps its dependencies away from ida-mcp's.
+$hcliPython = "$mcp\venv-hcli\Scripts\python.exe"
+$hcli = "$mcp\venv-hcli\Scripts\hcli.exe"
+if (-not (Test-Path $hcliPython)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-hcli")) 'venv venv-hcli' }
+Assert-Native (Invoke-Native $hcliPython @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', 'ida-hcli==0.26.3')) 'pip ida-hcli'
+Assert-Native (Invoke-Native $hcli @('ida', 'accept-eula', $idaDir)) 'hcli ida accept-eula'
+
+# The plugin repository lists ida-mcp releases newest first with the IDA versions each supports;
+# the GitHub release and the PyPI package share one version. The bare name is ambiguous there.
+# Only stdout is JSON: hcli warns on stderr when it is not logged in.
+$env:HCLI_CURRENT_IDA_INSTALL_DIR = $idaDir
+$ErrorActionPreference = 'Continue'
+$search = & $hcli plugin search 'ida-mcp@https://github.com/hexrayssa/ida-mcp' --json 2>$null | Out-String
+$searchExit = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($searchExit -ne 0) { throw "hcli plugin search ida-mcp failed (exit $searchExit):`n$search" }
+$result = $search | ConvertFrom-Json
+if ($result.error) { throw "hcli plugin search ida-mcp: $($result.error)" }
+$idaMcpVersion = @($result.versions | Where-Object compatible)[0].version
+if (-not $idaMcpVersion) { throw "hcli lists no ida-mcp release compatible with the IDA in $idaDir" }
+Write-Output "ida-mcp $idaMcpVersion (newest release hcli lists as compatible with this IDA)"
+
 $python = "$mcp\venv-ida\Scripts\python.exe"
 if (-not (Test-Path $python)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-ida")) 'venv venv-ida' }
 # ida-mcp pulls idapro from PyPI; the older wheel IDA ships in idalib\python conflicts with ida-nexus.
 # The installer already activated idalib for this IDA (--activate_idalib defaults to 1).
-Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$IdaMcpVersion")) 'pip ida-mcp'
-# hcli only accepts the EULA; its own venv keeps its dependencies away from ida-mcp's.
-$hcliPython = "$mcp\venv-hcli\Scripts\python.exe"
-if (-not (Test-Path $hcliPython)) { Assert-Native (Invoke-Native 'py' @('-3.13', '-m', 'venv', "$mcp\venv-hcli")) 'venv venv-hcli' }
-Assert-Native (Invoke-Native $hcliPython @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', 'ida-hcli==0.26.3')) 'pip ida-hcli'
-Assert-Native (Invoke-Native "$mcp\venv-hcli\Scripts\hcli.exe" @('ida', 'accept-eula', $idaDir)) 'hcli ida accept-eula'
+Assert-Native (Invoke-Native $python @('-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', "ida-mcp==$idaMcpVersion")) 'pip ida-mcp'
 # Loading idalib checks the license, so a bad license fails here instead of in Claude's first open_database.
 Assert-Native (Invoke-Native $python @('-c', 'import idapro')) 'import idapro'
 

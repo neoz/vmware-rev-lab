@@ -1098,15 +1098,17 @@ function Get-LabIdaInputs {
     # The host files add-ida.ps1 copies into the guest; checked before the guest goes on NAT.
     param([Parameter(Mandatory)][hashtable]$Config)
     $dir = Join-Path $Config.Root 'tools/ida'
+    # Any IDA version's installer (ida-pro_94_x64win.exe, ida-pro_95_x64win.exe, ...); one at a time.
+    $installers = @(Get-ChildItem -Path $dir -Filter 'ida-pro_*_x64win.exe' -File -ErrorAction SilentlyContinue)
+    if ($installers.Count -eq 0) { throw "Missing $(Join-Path $dir 'ida-pro_*_x64win.exe'); put the IDA Pro installer and license in tools/ida/." }
+    if ($installers.Count -gt 1) { throw "Several IDA Pro installers in ${dir} ($($installers.Name -join ', ')); keep only the one to install." }
     $inputs = [ordered]@{
-        Installer = Join-Path $dir 'ida-pro_94_x64win.exe'
+        Installer = $installers[0].FullName
         License   = Join-Path $dir 'idapro.hexlic'
         DataDir   = Join-Path $dir 'data'
         Data      = @()
     }
-    foreach ($path in $inputs.Installer, $inputs.License) {
-        if (-not (Test-Path $path)) { throw "Missing $path; put the IDA Pro installer and license in tools/ida/." }
-    }
+    if (-not (Test-Path $inputs.License)) { throw "Missing $($inputs.License); put the IDA Pro installer and license in tools/ida/." }
     if (Test-Path $inputs.DataDir) { $inputs.Data = @(Get-ChildItem -Path $inputs.DataDir -File -Recurse | ForEach-Object FullName) }
     $inputs
 }

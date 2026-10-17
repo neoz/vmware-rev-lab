@@ -3,7 +3,7 @@
 .SYNOPSIS
     Installs IDA Pro and ida-mcp (MCP server revlab-ida) into the clean snapshot.
 .DESCRIPTION
-    Needs tools/ida/ida-pro_94_x64win.exe and tools/ida/idapro.hexlic on the host; files under tools/ida/data
+    Needs one IDA Pro installer (tools/ida/ida-pro_<version>_x64win.exe, for example ida-pro_94_x64win.exe) and tools/ida/idapro.hexlic on the host; files under tools/ida/data
     are copied next to ida.exe. Reverts to clean, switches the guest to NAT, installs IDA,
     ida-mcp and the emulation packages (unicorn and z3 in venv-ida, angr in C:\lab\venv-emu), switches back to the isolated network and retakes the clean snapshot once all three MCP relays run.
     Only a human runs this: it gives the guest Internet.
@@ -23,7 +23,7 @@ try {
     if (Test-LabGuestFile -Config $config -GuestPath 'C:\Tools\IDA\ida.exe') {
         Write-LabLog 'IDA is already installed in the guest; not copying the installer.'
     } else {
-        Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-pro_94_x64win.exe'
+        Copy-LabToGuest -Config $config -HostPath $inputs.Installer -GuestPath 'C:\lab\tmp\ida\ida-installer.exe'
     }
     Copy-LabToGuest -Config $config -HostPath $inputs.License -GuestPath 'C:\lab\tmp\ida\idapro.hexlic'
     if ($inputs.Data) {
@@ -34,7 +34,7 @@ try {
         Remove-Item -Path $zip
     }
     $r = Invoke-LabGuestScript -Config $config -Path (Join-Path $config.Root 'templates/guest/ida-install.ps1') -Interactive -TimeoutSec 3600 -Arguments @{
-        IdaMcpVersion = $config.IdaMcpVersion; IdaPort = "$($config.McpIdaPort)"; User = $config.GuestUser
+        IdaPort ="$($config.McpIdaPort)"; User = $config.GuestUser
         AngrVersion = $config.AngrVersion; UnicornVersion = $config.UnicornVersion; Z3Version = $config.Z3Version
     }
     Write-LabLog $r.Output

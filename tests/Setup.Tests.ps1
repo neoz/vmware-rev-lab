@@ -184,8 +184,18 @@ Describe 'Get-LabIdaInputs' {
         @((Get-LabIdaInputs -Config @{ Root = $root }).Data).Count | Should -Be 0
     }
 
+    It 'takes the installer of any IDA version' {
+        foreach ($name in 'ida-pro_95_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
+        (Get-LabIdaInputs -Config @{ Root = $root }).Installer | Should -Be (Join-Path $root 'tools/ida/ida-pro_95_x64win.exe')
+    }
+
+    It 'refuses several installers' {
+        foreach ($name in 'ida-pro_94_x64win.exe', 'ida-pro_95_x64win.exe', 'idapro.hexlic') { 'x' | Set-Content (Join-Path $root "tools/ida/$name") }
+        { Get-LabIdaInputs -Config @{ Root = $root } } | Should -Throw -ExpectedMessage '*ida-pro_94_x64win.exe, ida-pro_95_x64win.exe*'
+    }
+
     It 'names the missing <Missing>' -ForEach @(
-        @{ Present = 'idapro.hexlic'; Missing = 'ida-pro_94_x64win.exe' }
+        @{ Present = 'idapro.hexlic'; Missing = 'ida-pro_*_x64win.exe' }
         @{ Present = 'ida-pro_94_x64win.exe'; Missing = 'idapro.hexlic' }
     ) {
         'x' | Set-Content (Join-Path $root "tools/ida/$Present")
