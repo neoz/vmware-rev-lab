@@ -21,6 +21,27 @@ A one-minute walkthrough: setup, then a case through static analysis,
 dynamic analysis, results and reset. Click the image to open the video
 (`docs/media/revlab-tour.mp4`). Tool output in the video is example data.
 
+## Diagrams
+
+Architecture: host scripts and Claude Code drive VMware; the guest tools reach
+the host over VMCI vSockets.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/revlab-architecture-dark.png">
+  <img alt="RevLab architecture" src="docs/diagrams/revlab-architecture-light.png">
+</picture>
+
+Case flow: from `case-open.ps1` through static and dynamic analysis to `notes.md`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/revlab-case-flow-dark.png">
+  <img alt="RevLab case flow" src="docs/diagrams/revlab-case-flow-light.png">
+</picture>
+
+Interactive versions (focus, guided views, export): download and open
+`docs/diagrams/revlab-architecture.html` and `docs/diagrams/revlab-case-flow.html`
+in a browser.
+
 ## Requirements
 
 - Windows host with VMware Workstation 17 or newer.
